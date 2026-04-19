@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     sec_user_agent: str = "praxis-v2 research-admin@praxis.local"
     edgar_poll_interval_s: int = 60
     edgar_form_types: str = "8-K"
+    edgar_item_allowlist: str = (
+        "1.01,2.01,2.02,2.03,2.04,2.05,2.06,3.02,4.01,4.02,5.01,5.02,5.06,7.01,8.01"
+    )
+    market_cap_max_usd: int = 2_000_000_000
+    market_cap_cache_ttl_s: int = 86_400
+    cik_ticker_refresh_interval_s: int = 86_400
 
     ntfy_base_url: str = "https://ntfy.sh"
     ntfy_alert_topic: str = "praxis-alerts"
@@ -61,6 +67,10 @@ class Settings(BaseSettings):
     @property
     def edgar_form_types_list(self) -> list[str]:
         return [s.strip() for s in self.edgar_form_types.split(",") if s.strip()]
+
+    @property
+    def edgar_item_allowlist_set(self) -> set[str]:
+        return {s.strip() for s in self.edgar_item_allowlist.split(",") if s.strip()}
 
 
 _settings: Settings | None = None

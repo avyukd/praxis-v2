@@ -23,6 +23,7 @@ dependencies = [
     "mcp>=1.1.0",
     "feedparser>=6.0.11",
     "watchdog>=6.0.0",
+    "yfinance>=0.2.50",
     "tomli>=2.0.2",
     "tomli-w>=1.0.0",
 ]

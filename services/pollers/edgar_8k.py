@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -16,6 +16,12 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from praxis_core.config import get_settings
 from praxis_core.db.models import Source
 from praxis_core.db.session import session_scope
+from praxis_core.filters.cik_ticker import load_cik_ticker_map
+from praxis_core.filters.edgar_items import (
+    extract_items_from_summary,
+    items_pass_allowlist,
+)
+from praxis_core.filters.market_cap import fetch_market_cap_usd, passes_mcap_filter
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
@@ -44,6 +50,8 @@ class EdgarFiling:
     link: str
     published: datetime
     ticker: str | None = None
+    items: list[str] = field(default_factory=list)
+    summary: str = ""
 
 
 class RateBucket:
@@ -145,7 +153,8 @@ def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
     """Parse EDGAR atom feed into EdgarFiling records.
 
     Uses multiple fallback strategies for each field — real EDGAR URLs/titles
-    have changed multiple times over the years.
+    have changed multiple times over the years. Also extracts `items` (8-K item codes)
+    from the <summary> HTML so downstream filters can run without fetching the filing.
     """
     feed = feedparser.parse(content)
     out: list[EdgarFiling] = []
@@ -153,9 +162,11 @@ def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
         raw_title = entry.get("title", "")
         raw_link = entry.get("link", "")
         raw_id = entry.get("id", "")
+        raw_summary = entry.get("summary", "")
         title: str = raw_title if isinstance(raw_title, str) else str(raw_title or "")
         link: str = raw_link if isinstance(raw_link, str) else str(raw_link or "")
         id_tag: str = raw_id if isinstance(raw_id, str) else str(raw_id or "")
+        summary: str = raw_summary if isinstance(raw_summary, str) else str(raw_summary or "")
 
         accession = _parse_accession_from_link(link, title) or _parse_accession_from_id_tag(id_tag)
         if not accession:
@@ -167,6 +178,7 @@ def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
 
         cik = _parse_cik_from_link(link) or _parse_cik_from_title(title) or ""
         ticker = _parse_ticker_from_entry(dict(entry))
+        items = extract_items_from_summary(summary) if form.startswith("8-K") else []
         published_raw_any = entry.get("updated") or entry.get("published")
         published_raw = published_raw_any if isinstance(published_raw_any, str) else None
         try:
@@ -186,6 +198,8 @@ def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
                 link=link,
                 published=published,
                 ticker=ticker,
+                items=items,
+                summary=summary,
             )
         )
     return out
@@ -196,13 +210,96 @@ async def _fetch_filing_text(filing: EdgarFiling, user_agent: str) -> str:
     return await _http_get(filing.link, user_agent)
 
 
-async def _ingest_filing(filing: EdgarFiling) -> bool:
+@dataclass
+class IngestDecision:
+    accept: bool
+    reason: str
+    matched_items: set[str] = field(default_factory=set)
+    ticker: str | None = None
+    market_cap_usd: int | None = None
+
+
+async def _decide_ingest(
+    filing: EdgarFiling,
+    *,
+    session,
+    cik_map,
+) -> IngestDecision:
+    """Apply deterministic gates BEFORE fetching/writing anything. Returns accept/reject."""
+    settings = get_settings()
+
+    # 1. Item-code allowlist (8-K only; other forms pass through)
+    matched: set[str] = set()
+    if filing.form_type.startswith("8-K"):
+        passes_items, matched = items_pass_allowlist(
+            filing.items, allowlist=settings.edgar_item_allowlist_set
+        )
+        if not passes_items:
+            return IngestDecision(
+                accept=False,
+                reason=f"items {filing.items or ['?']} not in allowlist",
+                matched_items=matched,
+            )
+
+    # 2. Resolve ticker via CIK map if not already known
+    ticker = filing.ticker or (cik_map.lookup(filing.cik) if filing.cik else None)
+
+    # 3. Market-cap filter (if ticker resolvable)
+    mcap: int | None = None
+    if ticker:
+        lookup = await fetch_market_cap_usd(session, ticker)
+        mcap = lookup.market_cap_usd
+        if not passes_mcap_filter(mcap, settings.market_cap_max_usd, keep_unknown=True):
+            return IngestDecision(
+                accept=False,
+                reason=f"mcap ${mcap:,} > ${settings.market_cap_max_usd:,}",
+                matched_items=matched,
+                ticker=ticker,
+                market_cap_usd=mcap,
+            )
+
+    return IngestDecision(
+        accept=True,
+        reason="accepted",
+        matched_items=matched,
+        ticker=ticker,
+        market_cap_usd=mcap,
+    )
+
+
+async def _ingest_filing(filing: EdgarFiling, cik_map) -> bool:
     settings = get_settings()
     raw_dir = vc.raw_filing_dir(settings.vault_root, filing.form_type, filing.accession)
     filing_txt = raw_dir / "filing.txt"
     meta_json = raw_dir / "meta.json"
 
     if filing_txt.exists() and meta_json.exists():
+        return False
+
+    # Gate decisions BEFORE doing any expensive work.
+    async with session_scope() as session:
+        decision = await _decide_ingest(filing, session=session, cik_map=cik_map)
+
+    if not decision.accept:
+        await emit_event(
+            "pollers.edgar_8k",
+            "filing_rejected",
+            {
+                "accession": filing.accession,
+                "form_type": filing.form_type,
+                "ticker": decision.ticker,
+                "cik": filing.cik,
+                "reason": decision.reason,
+                "items": filing.items,
+                "market_cap_usd": decision.market_cap_usd,
+            },
+        )
+        log.info(
+            "edgar.filing_rejected",
+            accession=filing.accession,
+            reason=decision.reason,
+            ticker=decision.ticker,
+        )
         return False
 
     try:
@@ -216,11 +313,14 @@ async def _ingest_filing(filing: EdgarFiling) -> bool:
         "accession": filing.accession,
         "form_type": filing.form_type,
         "cik": filing.cik,
-        "ticker": filing.ticker,
+        "ticker": decision.ticker,
         "title": filing.title,
         "link": filing.link,
         "published": et_iso(filing.published),
         "ingested_at": et_iso(),
+        "items": filing.items,
+        "matched_items": sorted(decision.matched_items),
+        "market_cap_usd": decision.market_cap_usd,
     }
     atomic_write(meta_json, json.dumps(meta, indent=2))
 
@@ -232,28 +332,49 @@ async def _ingest_filing(filing: EdgarFiling) -> bool:
                 dedup_key=f"filing:{filing.accession}",
                 source_type=f"filing_{filing.form_type.lower().replace('-', '_')}",
                 vault_path=rel_raw,
-                ticker=filing.ticker,
+                ticker=decision.ticker,
                 extra=meta,
             )
             .on_conflict_do_nothing(index_elements=[Source.dedup_key])
         )
         await session.execute(stmt)
 
-        priority = 0  # P0 for Monday filings
-        await enqueue_task(
-            session,
-            task_type=TaskType.TRIAGE_FILING,
-            payload={
-                "accession": filing.accession,
-                "form_type": filing.form_type,
-                "ticker": filing.ticker,
-                "cik": filing.cik,
-                "filing_url": filing.link,
-                "raw_path": rel_raw,
-            },
-            priority=priority,
-            dedup_key=f"triage_filing:{filing.accession}",
-        )
+        # 8-Ks go straight to analyze_filing (no Haiku triage — deterministic item filter
+        # already did the gating). Other forms still route through triage to allow
+        # content-based classification.
+        if filing.form_type.startswith("8-K"):
+            # analyze_filing expects a `triage_result_path`; use meta.json as the anchor
+            # since we have no triage artifact in the new flow.
+            triage_path_placeholder = str(meta_json.relative_to(settings.vault_root))
+            await enqueue_task(
+                session,
+                task_type=TaskType.ANALYZE_FILING,
+                payload={
+                    "accession": filing.accession,
+                    "form_type": filing.form_type,
+                    "ticker": decision.ticker,
+                    "cik": filing.cik,
+                    "triage_result_path": triage_path_placeholder,
+                    "raw_path": rel_raw,
+                },
+                priority=0,
+                dedup_key=f"analyze_filing:{filing.accession}",
+            )
+        else:
+            await enqueue_task(
+                session,
+                task_type=TaskType.TRIAGE_FILING,
+                payload={
+                    "accession": filing.accession,
+                    "form_type": filing.form_type,
+                    "ticker": decision.ticker,
+                    "cik": filing.cik,
+                    "filing_url": filing.link,
+                    "raw_path": rel_raw,
+                },
+                priority=0,
+                dedup_key=f"triage_filing:{filing.accession}",
+            )
 
     await emit_event(
         "pollers.edgar_8k",
@@ -261,14 +382,17 @@ async def _ingest_filing(filing: EdgarFiling) -> bool:
         {
             "accession": filing.accession,
             "form_type": filing.form_type,
-            "ticker": filing.ticker,
+            "ticker": decision.ticker,
+            "matched_items": sorted(decision.matched_items),
+            "market_cap_usd": decision.market_cap_usd,
         },
     )
     log.info(
         "edgar.filing_ingested",
         accession=filing.accession,
         form=filing.form_type,
-        ticker=filing.ticker,
+        ticker=decision.ticker,
+        matched_items=sorted(decision.matched_items),
     )
     return True
 
@@ -277,6 +401,11 @@ async def poll_once() -> int:
     settings = get_settings()
     forms = set(settings.edgar_form_types_list)
     ingested = 0
+
+    # Load CIK→ticker map once per poll cycle (cached in Postgres with daily refresh).
+    async with session_scope() as session:
+        cik_map = await load_cik_ticker_map(session)
+
     for form in forms:
         url = EDGAR_FEED_URL_TEMPLATE.format(form=form, count=40)
         try:
@@ -286,7 +415,7 @@ async def poll_once() -> int:
             continue
         filings = _parse_feed(content, form_filter={form})
         for f in filings:
-            if await _ingest_filing(f):
+            if await _ingest_filing(f, cik_map):
                 ingested += 1
     return ingested
 

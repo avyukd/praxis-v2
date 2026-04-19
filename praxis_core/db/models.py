@@ -201,6 +201,20 @@ class DeadLetterTask(Base):
     )
 
 
+class MarketCapCache(Base):
+    __tablename__ = "market_cap_cache"
+
+    ticker: Mapped[str] = mapped_column(String(16), primary_key=True)
+    market_cap_usd: Mapped[int | None] = mapped_column(BigInteger)
+    source: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="yfinance", server_default="'yfinance'"
+    )
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
 class SignalFired(Base):
     __tablename__ = "signals_fired"
 
