@@ -1,0 +1,225 @@
+"""praxis-migrate CLI — run from repo root.
+
+Usage:
+  uv run python -m services.migrate.cli plan \
+      --autoresearch-vault ~/dev/praxis-autoresearch/vault \
+      --copilot-workspace ~/dev/praxis-copilot/workspace \
+      --copilot-data ~/dev/praxis-copilot/data \
+      --target ~/vault-staging
+
+  uv run python -m services.migrate.cli apply --target ~/vault-staging (same flags)
+
+  uv run python -m services.migrate.cli validate --target ~/vault-staging
+
+  uv run python -m services.migrate.cli import-copilot-state \
+      --copilot-data ~/dev/praxis-copilot/data --apply
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from pathlib import Path
+
+import click
+
+from praxis_core.db.session import session_scope
+from praxis_core.logging import configure_logging, get_logger
+from praxis_core.vault.writer import atomic_write
+from services.migrate.copilot_state import import_copilot_state
+from services.migrate.vault_migrator import apply as apply_vault
+from services.migrate.vault_migrator import plan as plan_vault
+from services.migrate.workspace_migrator import migrate_workspace
+
+log = get_logger("migrate.cli")
+
+
+@click.group()
+def cli() -> None:
+    configure_logging()
+
+
+def _pp(p: str | None) -> Path | None:
+    return Path(p).expanduser() if p else None
+
+
+@cli.command()
+@click.option("--autoresearch-vault", required=True, type=click.Path())
+@click.option("--copilot-workspace", type=click.Path())
+@click.option("--copilot-data", type=click.Path())
+@click.option("--target", required=True, type=click.Path())
+@click.option("--report-path", type=click.Path(), default=None)
+def plan(
+    autoresearch_vault: str,
+    copilot_workspace: str | None,
+    copilot_data: str | None,
+    target: str,
+    report_path: str | None,
+) -> None:
+    """Dry-run; emit a migration report. No writes to target."""
+    ar = Path(autoresearch_vault).expanduser()
+    tgt = Path(target).expanduser()
+
+    click.echo(f"Planning vault migration: {ar} → {tgt}")
+    _, vault_report = plan_vault(ar, tgt)
+    full_report = vault_report.render()
+
+    if copilot_workspace:
+        ws = Path(copilot_workspace).expanduser()
+        ticker_dirs = sorted(d for d in ws.iterdir() if d.is_dir() and d.name != "analyst")
+        full_report += "\n\n" + "\n".join(
+            [
+                "# Workspace migration (plan)",
+                "",
+                f"Would scan {len(ticker_dirs)} ticker directories in {ws}.",
+                "Use `apply` to execute.",
+                "",
+            ]
+        )
+
+    if report_path:
+        out = Path(report_path).expanduser()
+    else:
+        out = tgt.parent / f"{tgt.name}-migration-plan.md"
+    atomic_write(out, full_report)
+    click.echo(f"Plan report written to {out}")
+    click.echo("")
+    click.echo("Summary:")
+    click.echo(f"  Files considered: {vault_report.entries_total}")
+    click.echo(f"  Planned writes: {vault_report.files_written}")
+    click.echo(f"  Drops: {vault_report.files_dropped}")
+    click.echo(f"  Passthrough/unhandled: {vault_report.files_passthrough}")
+    click.echo(f"  Wikilinks to rewrite: {vault_report.wikilinks_rewritten}")
+    click.echo(f"  Unresolved wikilinks (would break): {len(vault_report.unresolved_wikilinks)}")
+
+
+@cli.command()
+@click.option("--autoresearch-vault", required=True, type=click.Path())
+@click.option("--copilot-workspace", type=click.Path())
+@click.option("--target", required=True, type=click.Path())
+@click.option(
+    "--force/--no-force",
+    default=False,
+    help="Allow writing into a non-empty target (otherwise refuse to clobber).",
+)
+def apply(
+    autoresearch_vault: str,
+    copilot_workspace: str | None,
+    target: str,
+    force: bool,
+) -> None:
+    """Execute the migration: writes into target vault."""
+    ar = Path(autoresearch_vault).expanduser()
+    tgt = Path(target).expanduser()
+
+    if tgt.exists() and any(tgt.iterdir()) and not force:
+        raise click.ClickException(
+            f"target {tgt} is non-empty. Pass --force to proceed, "
+            "or delete / move the existing contents first."
+        )
+    tgt.mkdir(parents=True, exist_ok=True)
+
+    click.echo(f"Applying vault migration: {ar} → {tgt}")
+    vault_report = apply_vault(ar, tgt)
+    click.echo(vault_report.render())
+
+    if copilot_workspace:
+        ws = Path(copilot_workspace).expanduser()
+        click.echo(f"Applying workspace migration: {ws} → {tgt}")
+        # Build rename map once more so workspace memos inherit wikilink rewriting
+        from services.migrate.rename_map import build_rename_map, discover_known_tickers
+
+        rename_map = build_rename_map(ar, known_tickers=discover_known_tickers(ar))
+        ws_report = migrate_workspace(ws, tgt, rename_map=rename_map)
+        click.echo(ws_report.render())
+
+    # Write combined report
+    report_path = tgt / "_migration_report.md"
+    combined = vault_report.render()
+    if copilot_workspace:
+        combined += "\n\n" + ws_report.render()  # type: ignore[name-defined]
+    atomic_write(report_path, combined)
+    click.echo(f"Final report at {report_path}")
+
+
+@cli.command()
+@click.option("--target", required=True, type=click.Path())
+def validate(target: str) -> None:
+    """Post-run validation: count files, scan for broken wikilinks, produce summary."""
+    tgt = Path(target).expanduser()
+    if not tgt.exists():
+        raise click.ClickException(f"target {tgt} does not exist")
+
+    total_files = 0
+    total_links = 0
+    broken_links: list[tuple[str, str]] = []
+
+    # Build a set of all existing stems in target
+    stems_by_relpath: set[str] = set()
+    stems_by_slug: dict[str, str] = {}
+    for p in tgt.rglob("*.md"):
+        if any(part in {".cache", ".obsidian"} for part in p.parts):
+            continue
+        rel = p.relative_to(tgt).as_posix()[:-3]  # strip .md
+        stems_by_relpath.add(rel)
+        stems_by_slug.setdefault(Path(rel).name, rel)
+        total_files += 1
+
+    wikilink_re = re.compile(r"\[\[([^\[\]]+)\]\]")
+    for p in tgt.rglob("*.md"):
+        if any(part in {".cache", ".obsidian"} for part in p.parts):
+            continue
+        if "_raw" in p.parts or "_analyzed" in p.parts:
+            continue
+        # Skip the migration report itself — it contains example unresolved links as text
+        if p.name == "_migration_report.md":
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = p.relative_to(tgt).as_posix()
+        for m in wikilink_re.finditer(text):
+            raw = m.group(1).split("|", 1)[0].split("#", 1)[0].strip()
+            if raw.endswith(".md"):
+                raw = raw[:-3]
+            total_links += 1
+            if raw in stems_by_relpath:
+                continue
+            if Path(raw).name in stems_by_slug:
+                continue
+            broken_links.append((rel, raw))
+
+    click.echo(f"Files scanned: {total_files}")
+    click.echo(f"Wikilinks scanned: {total_links}")
+    click.echo(f"Broken wikilinks: {len(broken_links)}")
+    if broken_links:
+        click.echo("\nFirst 20 broken:")
+        for src, tgt_link in broken_links[:20]:
+            click.echo(f"  {src} → [[{tgt_link}]]")
+
+
+@cli.command("import-copilot-state")
+@click.option("--copilot-data", required=True, type=click.Path())
+@click.option("--apply/--dry-run", default=False, help="Actually write to Postgres")
+def import_state_cmd(copilot_data: str, apply: bool) -> None:
+    """Import praxis-copilot local state YAML into Postgres signals_fired.
+
+    Requires DATABASE_URL pointing at the target DB (usually praxis or a test DB).
+    """
+    data_dir = Path(copilot_data).expanduser()
+    if not data_dir.is_dir():
+        raise click.ClickException(f"copilot data dir not found: {data_dir}")
+
+    async def _run() -> None:
+        async with session_scope() as session:
+            report = await import_copilot_state(session, data_dir, dry_run=not apply)
+            click.echo(report.render())
+            if not apply:
+                click.echo("\n(dry-run — no writes. Re-run with --apply to commit.)")
+
+    asyncio.run(_run())
+
+
+if __name__ == "__main__":
+    cli()

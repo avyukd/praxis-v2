@@ -16,9 +16,14 @@ This vault is AI-managed and human read-only.
 
 ## Semantics
 
-- **company** (`companies/<TICKER>/`): living compiled knowledge. `notes.md` is the running summary,
-  `thesis.md` is optional evolving thesis, `memos/YYYY-MM-DD-<handle>.md` are dated formal snapshots,
-  `journal.md` is append-only work log, `data/` holds structured extracts.
+- **company** (`companies/<TICKER>/`): living compiled knowledge.
+  - `notes.md` — running compiled summary (the truth about this company).
+  - `thesis.md` — optional evolving thesis with kill criteria.
+  - `memos/YYYY-MM-DD-<handle>.md` — dated formal deliverables (Buy/Sell/Neutral decisions).
+  - `journal.md` — append-only work log (what was done, when, why).
+  - `data/` — structured extracts (fundamentals snapshots, filing tables).
+  - `analyst_reports/<specialist>.md` — subagent deep-dives (rigorous-financial, business-moat,
+    macro, etc.). Each report is the output of a specialist pass; `notes.md` compiles across them.
 - **theme** (`themes/<slug>.md`): time-bound narrative with direction and kill criteria.
   E.g., "ai-capex-digestion", "strait-of-hormuz".
 - **concept** (`concepts/<slug>.md`): evergreen framework OR specialty domain knowledge.
