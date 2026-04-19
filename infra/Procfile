@@ -1,0 +1,7 @@
+dispatcher: uv run python -m services.dispatcher.main
+scheduler:  uv run python -m services.scheduler.main
+mcp:        uv run python -m services.mcp.server
+dashboard:  uv run python -m services.dashboard.app
+edgar:      uv run python -m services.pollers.edgar_8k
+inbox:      uv run python -m services.pollers.inbox_watcher
+syncer:     uv run python -m services.syncer.main

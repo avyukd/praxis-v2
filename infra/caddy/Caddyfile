@@ -1,0 +1,11 @@
+# praxis-v2 Caddy reverse proxy config
+# Assumes Tailscale handles machine-to-machine TLS.
+
+:8080 {
+  reverse_proxy 127.0.0.1:8080
+}
+
+# Optionally expose on Tailscale hostname (replace with actual name)
+# ryzen.tail-scale.ts.net {
+#   reverse_proxy localhost:8080
+# }

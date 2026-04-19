@@ -1,0 +1,16 @@
+{
+  "include": ["praxis_core", "handlers", "services"],
+  "exclude": ["**/__pycache__", ".venv", "build", "dist"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "error",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUntypedFunctionDecorator": "none",
+  "reportPrivateUsage": "warning",
+  "reportDeprecated": "warning"
+}

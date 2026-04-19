@@ -1,0 +1,18 @@
+[Unit]
+Description=praxis-v2 vault syncer (restic → S3)
+After=network.target
+
+[Service]
+Type=simple
+User=praxis
+Group=praxis
+WorkingDirectory=/opt/praxis-v2
+EnvironmentFile=/etc/praxis/praxis.env
+ExecStart=/opt/praxis-v2/.venv/bin/python -m services.syncer.main
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

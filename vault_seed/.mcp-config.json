@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "praxis": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "services.mcp.server"],
+      "cwd": "/opt/praxis-v2"
+    }
+  }
+}

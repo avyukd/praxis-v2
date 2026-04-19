@@ -1,0 +1,20 @@
+[Unit]
+Description=praxis-v2 EDGAR 8-K poller
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=praxis
+Group=praxis
+WorkingDirectory=/opt/praxis-v2
+EnvironmentFile=/etc/praxis/praxis.env
+ExecStart=/opt/praxis-v2/.venv/bin/python -m services.pollers.edgar_8k
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=120
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

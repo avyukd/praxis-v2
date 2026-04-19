@@ -1,0 +1,24 @@
+[Unit]
+Description=praxis-v2 dispatcher
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=praxis
+Group=praxis
+WorkingDirectory=/opt/praxis-v2
+EnvironmentFile=/etc/praxis/praxis.env
+ExecStart=/opt/praxis-v2/.venv/bin/python -m services.dispatcher.main
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=120
+WatchdogSec=120
+StandardOutput=journal
+StandardError=journal
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
