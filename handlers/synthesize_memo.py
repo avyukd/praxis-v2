@@ -73,7 +73,7 @@ If the notes are thin, the memo should be short and decisively Neutral or Too Ha
         system_prompt=system,
         user_prompt=user_prompt,
         model=TaskModel.OPUS,
-        max_turns=20,
+        max_budget_usd=6.00,  # Opus memo synthesis, expensive but valuable
         vault_root=ctx.vault_root,
     )
 

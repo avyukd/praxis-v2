@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from handlers import HandlerContext, HandlerResult
 from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
+from handlers._plan_parser import parse_plan
 from praxis_core.db.models import Investigation
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
@@ -92,7 +93,7 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
         system_prompt=system,
         user_prompt=user_prompt,
         model=TaskModel.SONNET,
-        max_turns=6,
+        max_budget_usd=0.50,  # short planner call
         vault_root=ctx.vault_root,
     )
     log.info("orchestrate_dive.done", task_id=ctx.task_id, finish_reason=result.finish_reason)
@@ -124,11 +125,25 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
         async with session_scope() as session:
             await _ensure_investigation(session)
 
+    # Default plan if LLM didn't write one or we can't parse it
+    default_plan: list[TaskType] = [
+        TaskType.DIVE_BUSINESS,
+        TaskType.DIVE_MOAT,
+        TaskType.DIVE_FINANCIALS,
+        TaskType.SYNTHESIZE_MEMO,
+    ]
+
     # Ensure the investigation file exists even if the LLM didn't write it
     if not inv_path.exists():
+        default_body = (
+            f"# Investigation: {payload.ticker}\n\n"
+            "## Plan\n"
+            + "\n".join(f"{i + 1}. {t.value}" for i, t in enumerate(default_plan))
+            + "\n\n## Log\n"
+        )
         write_markdown_with_frontmatter(
             inv_path,
-            body=f"# Investigation: {payload.ticker}\n\n## Plan\n1. dive_business\n2. dive_moat\n3. dive_financials\n4. synthesize_memo\n\n## Log\n",
+            body=default_body,
             metadata={
                 "type": "investigation",
                 "status": "active",
@@ -139,39 +154,36 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
             },
         )
 
-    # Enqueue the specialist dive tasks for this investigation
-    plan_sequence: list[tuple[TaskType, dict]] = [
-        (
-            TaskType.DIVE_BUSINESS,
-            {
-                "ticker": payload.ticker,
-                "investigation_handle": payload.investigation_handle,
-            },
-        ),
-        (
-            TaskType.DIVE_MOAT,
-            {
-                "ticker": payload.ticker,
-                "investigation_handle": payload.investigation_handle,
-            },
-        ),
-        (
-            TaskType.DIVE_FINANCIALS,
-            {
-                "ticker": payload.ticker,
-                "investigation_handle": payload.investigation_handle,
-            },
-        ),
-        (
-            TaskType.SYNTHESIZE_MEMO,
-            {
+    # Parse the LLM's plan; fall back to default if it's empty/unparseable.
+    try:
+        plan_text = inv_path.read_text(encoding="utf-8")
+    except OSError:
+        plan_text = ""
+    parsed_plan = parse_plan(plan_text)
+    plan_types = parsed_plan if parsed_plan else default_plan
+    log.info(
+        "orchestrate_dive.plan_resolved",
+        task_id=ctx.task_id,
+        parsed_count=len(parsed_plan),
+        using=[t.value for t in plan_types],
+    )
+
+    memo_handle = f"{payload.ticker.lower()}-dive-{et_date_str().replace('-', '')}"
+
+    def _payload_for(task_type: TaskType) -> dict:
+        if task_type == TaskType.SYNTHESIZE_MEMO:
+            return {
                 "ticker": payload.ticker,
                 "investigation_handle": payload.investigation_handle,
                 "thesis_handle": payload.thesis_handle,
-                "memo_handle": f"{payload.ticker.lower()}-dive-{et_date_str().replace('-', '')}",
-            },
-        ),
-    ]
+                "memo_handle": memo_handle,
+            }
+        return {
+            "ticker": payload.ticker,
+            "investigation_handle": payload.investigation_handle,
+        }
+
+    plan_sequence: list[tuple[TaskType, dict]] = [(t, _payload_for(t)) for t in plan_types]
 
     async def _enqueue_sequence(s) -> None:
         inv = (

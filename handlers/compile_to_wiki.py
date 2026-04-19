@@ -69,7 +69,7 @@ Be concise. Exit when artifacts are written.
         system_prompt=system,
         user_prompt=user_prompt,
         model=TaskModel.SONNET,
-        max_turns=20,
+        max_budget_usd=2.00,  # touches many files, multi-turn
         vault_root=ctx.vault_root,
     )
     log.info("compile_to_wiki.done", task_id=ctx.task_id, finish_reason=result.finish_reason)

@@ -59,12 +59,19 @@ async def claim_next_task(
         )
         params["excluded_resource_keys"] = excluded_resource_keys
 
+    # Claim queued/partial, OR running tasks whose lease has expired (crash recovery).
     sql = f"""
         WITH candidate AS (
           SELECT id
           FROM tasks
-          WHERE status IN ('queued', 'partial')
-            AND (lease_expires_at IS NULL OR lease_expires_at < now())
+          WHERE (
+              (status IN ('queued', 'partial')
+               AND (lease_expires_at IS NULL OR lease_expires_at < now()))
+              OR
+              (status = 'running'
+               AND lease_expires_at IS NOT NULL
+               AND lease_expires_at < now())
+            )
             {type_clause}
             {model_clause}
             {resource_clause}
@@ -77,7 +84,7 @@ async def claim_next_task(
         UPDATE tasks SET
           status = 'running',
           lease_holder = :worker_id,
-          lease_expires_at = now() + (:lease_s || ' seconds')::interval,
+          lease_expires_at = now() + :lease_s * interval '1 second',
           attempts = attempts + 1,
           started_at = COALESCE(started_at, now())
         WHERE id = (SELECT id FROM candidate)
@@ -89,6 +96,8 @@ async def claim_next_task(
         return None
     task = await session.get(Task, row.id)
     if task is not None:
+        # UPDATE bypassed the ORM so identity-map may hold a stale copy.
+        await session.refresh(task)
         log.info(
             "task.claimed",
             task_id=str(task.id),
@@ -105,7 +114,7 @@ async def extend_lease(session: AsyncSession, task_id: uuid.UUID, worker_id: str
         text(
             """
             UPDATE tasks
-            SET lease_expires_at = now() + (:lease_s || ' seconds')::interval
+            SET lease_expires_at = now() + :lease_s * interval '1 second'
             WHERE id = :task_id AND lease_holder = :worker_id AND status = 'running'
             RETURNING id
             """
@@ -124,7 +133,7 @@ async def mark_running(session: AsyncSession, task_id: uuid.UUID, worker_id: str
             UPDATE tasks
             SET status = 'running',
                 lease_holder = :worker_id,
-                lease_expires_at = now() + (:lease_s || ' seconds')::interval,
+                lease_expires_at = now() + :lease_s * interval '1 second',
                 started_at = COALESCE(started_at, now())
             WHERE id = :task_id
             """
@@ -149,7 +158,7 @@ async def mark_success(
                 lease_holder = NULL,
                 lease_expires_at = NULL,
                 validation_result = :validation,
-                telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(:telemetry::jsonb, '{}'::jsonb)
+                telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(CAST(:telemetry AS jsonb), '{}'::jsonb)
             WHERE id = :task_id
             """
         ),
@@ -173,7 +182,7 @@ async def mark_partial(
                 lease_holder = NULL,
                 lease_expires_at = NULL,
                 validation_result = :validation,
-                telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(:telemetry::jsonb, '{}'::jsonb)
+                telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(CAST(:telemetry AS jsonb), '{}'::jsonb)
             WHERE id = :task_id
             """
         ),
@@ -200,7 +209,7 @@ async def mark_failed(
                 lease_holder = NULL,
                 lease_expires_at = NULL,
                 last_error = :error,
-                telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(:telemetry::jsonb, '{}'::jsonb)
+                telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(CAST(:telemetry AS jsonb), '{}'::jsonb)
             WHERE id = :task_id
             """
         ),

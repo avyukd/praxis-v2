@@ -84,7 +84,7 @@ Process:
         system_prompt=system,
         user_prompt=user_prompt,
         model=TaskModel.OPUS,
-        max_turns=20,
+        max_budget_usd=5.00,  # Opus dive task
         vault_root=ctx.vault_root,
     )
     log.info(

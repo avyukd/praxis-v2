@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from praxis_core.llm.invoker import LLMInvoker, LLMResult, get_invoker
+from praxis_core.llm.invoker import LLMResult, get_invoker
 from praxis_core.schemas.task_types import TaskModel
 from praxis_core.vault import conventions as vc
 
@@ -12,17 +12,17 @@ async def run_llm(
     system_prompt: str,
     user_prompt: str,
     model: TaskModel,
-    max_turns: int = 15,
+    max_budget_usd: float | None = None,
     vault_root: Path,
     allowed_tools: list[str] | None = None,
 ) -> LLMResult:
-    invoker: LLMInvoker = get_invoker()
+    invoker = get_invoker()
     mcp_cfg = _mcp_config_for_vault(vault_root)
     return await invoker.run(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         model=model,
-        max_turns=max_turns,
+        max_budget_usd=max_budget_usd,
         mcp_config_path=str(mcp_cfg) if mcp_cfg else None,
         allowed_tools=allowed_tools
         or [

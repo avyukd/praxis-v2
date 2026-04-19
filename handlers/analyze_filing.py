@@ -74,7 +74,7 @@ If you reference existing wiki nodes (themes, concepts, companies), use their re
         system_prompt=system,
         user_prompt=user_prompt,
         model=TaskModel.SONNET,
-        max_turns=12,
+        max_budget_usd=1.50,  # deep-read of one filing, allows multi-turn tool use
         vault_root=ctx.vault_root,
     )
     log.info(

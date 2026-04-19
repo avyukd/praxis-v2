@@ -81,7 +81,7 @@ class RateLimitManager:
                 """
                 UPDATE rate_limit_state
                 SET consecutive_hits = consecutive_hits + 1,
-                    limited_until_ts = now() + (:backoff_s || ' seconds')::interval,
+                    limited_until_ts = now() + :backoff_s * interval '1 second',
                     last_hit_ts = now(),
                     status = 'limited',
                     probe_task_id = NULL

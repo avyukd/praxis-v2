@@ -157,10 +157,7 @@ def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
         link: str = raw_link if isinstance(raw_link, str) else str(raw_link or "")
         id_tag: str = raw_id if isinstance(raw_id, str) else str(raw_id or "")
 
-        accession = (
-            _parse_accession_from_link(link, title)
-            or _parse_accession_from_id_tag(id_tag)
-        )
+        accession = _parse_accession_from_link(link, title) or _parse_accession_from_id_tag(id_tag)
         if not accession:
             continue
 

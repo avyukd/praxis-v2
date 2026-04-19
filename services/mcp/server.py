@@ -10,6 +10,7 @@ from sqlalchemy import desc, func, select, update
 
 from praxis_core.config import get_settings
 from praxis_core.db.models import (
+    DeadLetterTask,
     Heartbeat,
     Investigation,
     SignalFired,
@@ -218,12 +219,11 @@ async def reprioritize(task_id: str, new_priority: int) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def boost_ticker(ticker: str, duration_min: int = 60) -> dict[str, Any]:
-    """Boost all queued+running tasks for this ticker by 1 priority tier.
+async def boost_ticker(ticker: str) -> dict[str, Any]:
+    """Boost currently queued/running tasks for this ticker by 1 priority tier.
 
-    The boost only lasts for tasks currently in queue or running — newly created
-    tasks after this call will NOT be boosted unless the corresponding investigation
-    / dive is started while you're still 'interested'.
+    One-shot — only affects tasks already in-flight at call time. Re-call if you
+    want continued emphasis on new tasks spawned after this point.
     """
     async with session_scope() as session:
         stmt = (
@@ -238,7 +238,7 @@ async def boost_ticker(ticker: str, duration_min: int = 60) -> dict[str, Any]:
         await emit_event(
             "mcp.server",
             "boost_ticker",
-            {"ticker": ticker, "affected": affected, "duration_min": duration_min},
+            {"ticker": ticker, "affected": affected},
         )
     return {"ok": True, "ticker": ticker, "affected": affected}
 
@@ -441,6 +441,97 @@ async def ingest_source(content: str, title: str, source_hint: str | None = None
         await emit_event("mcp.server", "ingest_source", {"path": rel, "title": title})
 
     return {"ok": True, "path": rel}
+
+
+# -----------------
+# Dead-letter recovery
+# -----------------
+
+
+@mcp.tool()
+async def list_dead_letters(limit: int = 50) -> list[dict[str, Any]]:
+    """Show the dead-letter queue (tasks that gave up retrying)."""
+    async with session_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(DeadLetterTask).order_by(desc(DeadLetterTask.failed_at)).limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [
+        {
+            "id": str(r.id),
+            "failed_at": et_iso(r.failed_at),
+            "final_error": r.final_error[:500] if r.final_error else None,
+            "task_type": (r.original_task or {}).get("type"),
+            "payload": (r.original_task or {}).get("payload"),
+            "attempts": (r.original_task or {}).get("attempts"),
+        }
+        for r in rows
+    ]
+
+
+@mcp.tool()
+async def inspect_dead_letter(dead_letter_id: str) -> dict[str, Any]:
+    """Full detail for one dead-lettered task."""
+    async with session_scope() as session:
+        dl = await session.get(DeadLetterTask, uuid.UUID(dead_letter_id))
+        if dl is None:
+            return {"ok": False, "error": "not found"}
+    return {
+        "ok": True,
+        "id": str(dl.id),
+        "failed_at": et_iso(dl.failed_at),
+        "final_error": dl.final_error,
+        "original_task": dl.original_task,
+    }
+
+
+@mcp.tool()
+async def requeue_dead_letter(dead_letter_id: str, reset_attempts: bool = True) -> dict[str, Any]:
+    """Put a dead-lettered task back in the queue for another try.
+
+    If reset_attempts=True (default), attempts counter is set to 0 so the task
+    gets max_attempts fresh retries. If False, just resets status — typically only
+    when you've manually fixed the underlying problem and want one more try.
+    """
+    from sqlalchemy import text as _text
+
+    async with session_scope() as session:
+        dl = await session.get(DeadLetterTask, uuid.UUID(dead_letter_id))
+        if dl is None:
+            return {"ok": False, "error": "not found"}
+
+        original = dl.original_task or {}
+        task_id = original.get("id")
+        if not task_id:
+            return {"ok": False, "error": "original task has no id field"}
+
+        task = await session.get(Task, uuid.UUID(task_id))
+        if task is None:
+            return {"ok": False, "error": "task row missing"}
+
+        # Reset to queued state
+        await session.execute(
+            _text(
+                "UPDATE tasks SET status='queued', lease_holder=NULL, lease_expires_at=NULL, "
+                "attempts=CASE WHEN :reset_attempts THEN 0 ELSE attempts END, "
+                "rate_limit_bounces=0, last_error=NULL, finished_at=NULL "
+                "WHERE id=:id"
+            ),
+            {"id": task.id, "reset_attempts": reset_attempts},
+        )
+        await session.delete(dl)
+
+        await emit_event(
+            "mcp.server",
+            "dead_letter_requeued",
+            {"task_id": str(task.id), "reset_attempts": reset_attempts},
+        )
+    return {"ok": True, "task_id": task_id}
 
 
 def main() -> None:

@@ -91,13 +91,23 @@ def validate_analyze_filing(payload_raw: dict[str, Any], vault_root: Path) -> Va
     return ValidationResult(ok=ok, missing=missing, malformed=malformed)
 
 
+_MIN_NOTE_LEN = 100  # "x" alone shouldn't pass validation
+
+
 def validate_compile_to_wiki(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    """Checks that compile_to_wiki actually produced compiled knowledge.
+
+    Beyond file existence:
+      - INDEX and LOG touched (minimum).
+      - For ticker compiles: notes.md + journal.md exist AND are non-trivial.
+      - notes.md references the analysis_path (proves compile actually read the source,
+        not just appended filler to pass a file-count check).
+    """
     payload = CompileToWikiPayload.model_validate(payload_raw)
     ok: list[str] = []
     missing: list[str] = []
     malformed: list[ValidationMalformed] = []
 
-    # Always expect INDEX and LOG touched
     for p in (vc.index_path(vault_root), vc.log_path(vault_root)):
         s, exists = _check_file_exists(p)
         (ok if exists else missing).append(s)
@@ -105,9 +115,40 @@ def validate_compile_to_wiki(payload_raw: dict[str, Any], vault_root: Path) -> V
     if payload.ticker:
         notes = vc.company_notes_path(vault_root, payload.ticker)
         journal = vc.company_journal_path(vault_root, payload.ticker)
-        for p in (notes, journal):
-            s, exists = _check_file_exists(p)
-            (ok if exists else missing).append(s)
+
+        s_notes, notes_exists = _check_file_exists(notes)
+        if notes_exists:
+            text_body = notes.read_text(encoding="utf-8", errors="replace")
+            if len(text_body) < _MIN_NOTE_LEN:
+                malformed.append(
+                    ValidationMalformed(
+                        path=s_notes,
+                        reason=f"notes.md too small ({len(text_body)} chars < {_MIN_NOTE_LEN})",
+                    )
+                )
+            elif payload.analysis_path and payload.analysis_path not in text_body:
+                malformed.append(
+                    ValidationMalformed(
+                        path=s_notes,
+                        reason=f"notes.md missing backlink to {payload.analysis_path}",
+                    )
+                )
+            else:
+                ok.append(s_notes)
+        else:
+            missing.append(s_notes)
+
+        s_journal, j_exists = _check_file_exists(journal)
+        if j_exists:
+            jtext = journal.read_text(encoding="utf-8", errors="replace")
+            if len(jtext) < 20:  # journal is append-only; should have at least one dated line
+                malformed.append(
+                    ValidationMalformed(path=s_journal, reason="journal.md effectively empty")
+                )
+            else:
+                ok.append(s_journal)
+        else:
+            missing.append(s_journal)
 
     touched = len(ok)
     if touched < 3:

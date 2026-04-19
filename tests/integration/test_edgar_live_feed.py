@@ -73,7 +73,10 @@ def test_cik_extraction_from_live_url() -> None:
 
 
 def test_cik_from_title() -> None:
-    assert _parse_cik_from_title("8-K - Terra Innovatum Global N.V. (0002067627) (Filer)") == "0002067627"
+    assert (
+        _parse_cik_from_title("8-K - Terra Innovatum Global N.V. (0002067627) (Filer)")
+        == "0002067627"
+    )
 
 
 def test_accession_from_id_tag() -> None:
@@ -82,6 +85,9 @@ def test_accession_from_id_tag() -> None:
 
 
 def test_form_type_parsing() -> None:
-    assert _parse_form_type_from_title("8-K - Terra Innovatum Global N.V. (0002067627) (Filer)") == "8-K"
+    assert (
+        _parse_form_type_from_title("8-K - Terra Innovatum Global N.V. (0002067627) (Filer)")
+        == "8-K"
+    )
     assert _parse_form_type_from_title("10-Q - Company (0001234567) (Filer)") == "10-Q"
     assert _parse_form_type_from_title("10-K/A - Company (0001234567) (Filer)") == "10-K/A"

@@ -75,7 +75,7 @@ Create {out_dir} first via Bash if it doesn't exist, then use Write. Exit when d
         system_prompt=system,
         user_prompt=user_prompt,
         model=TaskModel.HAIKU,
-        max_turns=6,
+        max_budget_usd=0.10,  # triage is a quick Haiku call
         vault_root=ctx.vault_root,
     )
     log.info(

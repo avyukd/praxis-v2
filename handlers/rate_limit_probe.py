@@ -21,7 +21,7 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
         system_prompt=SYSTEM_PROMPT,
         user_prompt="Reply with only 'ok'. Do not call any tools.",
         model=TaskModel.HAIKU,
-        max_turns=1,
+        max_budget_usd=0.05,
         vault_root=ctx.vault_root,
         allowed_tools=[],
     )

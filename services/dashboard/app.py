@@ -11,7 +11,14 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import desc, func, select
 
 from praxis_core.config import get_settings
-from praxis_core.db.models import Event, Heartbeat, Investigation, SignalFired, Task
+from praxis_core.db.models import (
+    DeadLetterTask,
+    Event,
+    Heartbeat,
+    Investigation,
+    SignalFired,
+    Task,
+)
 from praxis_core.db.session import session_scope
 from praxis_core.llm.rate_limit import RateLimitManager
 from praxis_core.logging import configure_logging, get_logger
@@ -222,6 +229,31 @@ async def investigations(limit: int = 50) -> list[dict[str, Any]]:
     ]
 
 
+@app.get("/api/dead_letters", response_class=JSONResponse)
+async def dead_letters(limit: int = 50) -> list[dict[str, Any]]:
+    async with session_scope() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(DeadLetterTask).order_by(desc(DeadLetterTask.failed_at)).limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [
+        {
+            "id": str(r.id),
+            "failed_at": et_iso(r.failed_at),
+            "final_error": r.final_error[:500] if r.final_error else None,
+            "task_type": (r.original_task or {}).get("type"),
+            "attempts": (r.original_task or {}).get("attempts"),
+            "payload": (r.original_task or {}).get("payload"),
+        }
+        for r in rows
+    ]
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -246,13 +278,19 @@ td,th{padding:.3em .5em;border-bottom:1px solid #222;text-align:left;font-size:.
 pre{background:#000;padding:.5em;overflow:auto;font-size:.8em}
 .tile{display:inline-block;padding:.4em .8em;margin-right:.5em;background:#222;border-radius:3px}
 .refresh{float:right;color:#888;font-size:.8em}
+.spinner{display:inline-block;width:.7em;height:.7em;border:2px solid #444;border-top-color:#6f6;border-radius:50%;animation:spin 1s linear infinite;vertical-align:middle;margin-right:.3em}
+@keyframes spin{to{transform:rotate(360deg)}}
+.stale{color:#f66}
+button.refresh-btn{background:#333;color:#eee;border:1px solid #555;padding:.3em .6em;border-radius:3px;cursor:pointer;margin-left:.5em}
 </style></head><body>
-<h1>praxis-v2 <span class='refresh' id='refreshed'></span></h1>
+<h1>praxis-v2 <span class='refresh' id='refreshed'></span>
+<button class='refresh-btn' onclick='refresh()'>refresh</button></h1>
 
 <h2>Rate limit</h2><div id='rl'>loading...</div>
 <h2>Health</h2><div id='health'>loading...</div>
 <h2>Task queue</h2><div id='tasks'>loading...</div>
 <h2>Cost (today)</h2><div id='cost'>loading...</div>
+<h2>Dead letter</h2><div id='dl'>loading...</div>
 <h2>Investigations</h2><div id='inv'>loading...</div>
 <h2>Signals (24h)</h2><div id='signals'>loading...</div>
 <h2>Events (last 50)</h2><div id='events'>loading...</div>
@@ -313,26 +351,40 @@ function renderEvents(ev){
     ev.map(e=>`<tr><td>${e.ts}</td><td>${e.component}</td><td>${e.event_type}</td><td><pre>${JSON.stringify(e.payload||{})}</pre></td></tr>`).join('')+'</table>';
 }
 
+function renderDL(dl){
+  if(!dl.length) return '<p class="grey">No dead letters.</p>';
+  return `<p class='red'>${dl.length} dead-lettered task(s) — use MCP requeue_dead_letter(id) after fixing root cause.</p>`+
+    '<table><tr><th>id</th><th>type</th><th>failed</th><th>attempts</th><th>error</th></tr>'+
+    dl.map(d=>`<tr><td>${d.id.slice(0,8)}</td><td>${d.task_type||'?'}</td><td>${d.failed_at}</td><td>${d.attempts||'?'}</td><td class='red'>${(d.final_error||'').slice(0,200)}</td></tr>`).join('')+'</table>';
+}
+
+let inflight=0;
 async function refresh(){
+  inflight++;
+  el('refreshed').innerHTML="<span class='spinner'></span>refreshing...";
+  const started=Date.now();
   try{
-    const [h,t,rl,c,inv,sg,ev]=await Promise.all([
+    const [h,t,rl,c,dl,inv,sg,ev]=await Promise.all([
       j('/api/health'),j('/api/tasks'),j('/api/rate_limit'),j('/api/cost'),
-      j('/api/investigations'),j('/api/signals'),j('/api/events')
+      j('/api/dead_letters'),j('/api/investigations'),j('/api/signals'),j('/api/events')
     ]);
     el('health').innerHTML=renderHealth(h);
     el('tasks').innerHTML=renderTasks(t);
     el('rl').innerHTML=renderRL(rl);
     el('cost').innerHTML=renderCost(c);
+    el('dl').innerHTML=renderDL(dl);
     el('inv').innerHTML=renderInv(inv);
     el('signals').innerHTML=renderSignals(sg);
     el('events').innerHTML=renderEvents(ev);
-    el('refreshed').innerText='refreshed '+new Date().toLocaleTimeString();
+    el('refreshed').innerText='refreshed '+new Date().toLocaleTimeString()+` (${Date.now()-started}ms)`;
   }catch(e){
-    el('refreshed').innerText='ERROR: '+e;
+    el('refreshed').innerHTML='<span class="stale">ERROR: '+e+' — showing stale data</span>';
+  }finally{
+    inflight--;
   }
 }
 refresh();
-setInterval(refresh,5000);
+setInterval(()=>{if(inflight===0)refresh();},10000);
 </script>
 </body></html>"""
 

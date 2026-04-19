@@ -45,6 +45,14 @@ class LLMResult(BaseModel):
     invoker: Literal["cli", "api"]
 
 
+MODEL_BUDGETS_USD: dict[TaskModel, float] = {
+    TaskModel.HAIKU: 0.50,
+    TaskModel.SONNET: 2.50,
+    TaskModel.OPUS: 6.00,
+    TaskModel.NONE: 0.0,
+}
+
+
 class LLMInvoker(Protocol):
     invoker_kind: Literal["cli", "api"]
 
@@ -54,7 +62,7 @@ class LLMInvoker(Protocol):
         user_prompt: str,
         *,
         model: TaskModel,
-        max_turns: int = 15,
+        max_budget_usd: float | None = None,
         timeout_s: int | None = None,
         no_event_timeout_s: int | None = None,
         mcp_config_path: str | None = None,
@@ -73,7 +81,7 @@ class CLIInvoker:
         user_prompt: str,
         *,
         model: TaskModel,
-        max_turns: int = 15,
+        max_budget_usd: float | None = None,
         timeout_s: int | None = None,
         no_event_timeout_s: int | None = None,
         mcp_config_path: str | None = None,
@@ -83,6 +91,7 @@ class CLIInvoker:
         settings = get_settings()
         timeout_s = timeout_s or settings.cli_wall_clock_timeout_s
         no_event_timeout_s = no_event_timeout_s or settings.cli_no_event_timeout_s
+        budget = max_budget_usd if max_budget_usd is not None else MODEL_BUDGETS_USD[model]
 
         if model is TaskModel.NONE:
             raise ValueError("CLIInvoker.run called with model=NONE")
@@ -102,21 +111,22 @@ class CLIInvoker:
             "--output-format=stream-json",
             "--verbose",
             f"--model={MODEL_TO_CLI_FLAG[model]}",
-            f"--max-turns={max_turns}",
             "--dangerously-skip-permissions",
+            f"--max-budget-usd={budget}",
         ]
         if system_prompt:
             cmd.extend(["--append-system-prompt", system_prompt])
         if mcp_config_path:
             cmd.extend(["--mcp-config", mcp_config_path])
         if allowed_tools:
+            # Claude CLI takes either comma-separated or space-separated; use a single arg
             cmd.extend(["--allowedTools", ",".join(allowed_tools)])
 
         log.info(
             "cli.invoke.start",
             model=str(model),
             cwd=str(session_dir),
-            max_turns=max_turns,
+            budget_usd=budget,
             timeout_s=timeout_s,
         )
 
@@ -260,7 +270,7 @@ class APIInvoker:
         user_prompt: str,
         *,
         model: TaskModel,
-        max_turns: int = 15,
+        max_budget_usd: float | None = None,
         timeout_s: int | None = None,
         no_event_timeout_s: int | None = None,
         mcp_config_path: str | None = None,
@@ -268,6 +278,8 @@ class APIInvoker:
         session_dir: Path | None = None,
     ) -> LLMResult:
         from anthropic import AsyncAnthropic
+
+        _ = max_budget_usd  # API mode doesn't use CLI-level budget cap; rely on timeout
 
         settings = get_settings()
         timeout_s = timeout_s or settings.cli_wall_clock_timeout_s
@@ -333,17 +345,15 @@ class APIInvoker:
             )
 
 
-_invoker: LLMInvoker | None = None
+_invoker: CLIInvoker | APIInvoker | None = None
 
 
-def get_invoker() -> LLMInvoker:
+def get_invoker() -> CLIInvoker | APIInvoker:
     global _invoker
     if _invoker is None:
         settings = get_settings()
-        if settings.praxis_invoker == "api":
-            _invoker = APIInvoker()
-        else:
-            _invoker = CLIInvoker()
+        _invoker = APIInvoker() if settings.praxis_invoker == "api" else CLIInvoker()
+    assert _invoker is not None
     return _invoker
 
 
