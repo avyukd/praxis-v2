@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
-
-from praxis_core.logging import get_logger
-from praxis_core.schemas.task_types import TaskModel
-from praxis_core.vault import conventions as vc
-
 from handlers import HandlerContext, HandlerResult
 from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
+from praxis_core.logging import get_logger
+from praxis_core.schemas.task_types import TaskModel
+from praxis_core.time_et import et_iso
+from praxis_core.vault import conventions as vc
 
 log = get_logger("handlers.dive")
 
@@ -49,7 +46,7 @@ async def run_dive(
     if not ticker:
         raise ValueError(f"{ctx.task_type} missing ticker")
     investigation_handle = ctx.payload.get("investigation_handle") or ""
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = et_iso()
 
     notes_path = vc.company_notes_path(ctx.vault_root, ticker)
     journal_path = vc.company_journal_path(ctx.vault_root, ticker)

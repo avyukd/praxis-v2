@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 import frontmatter
 
+from handlers import HandlerContext, HandlerResult
 from praxis_core.logging import get_logger
 from praxis_core.schemas.artifacts import LintFinding, LintReport
 from praxis_core.schemas.payloads import LintVaultPayload
-from praxis_core.vault import conventions as vc
+from praxis_core.time_et import et_date_str, et_iso
 from praxis_core.vault.writer import atomic_write
-
-from handlers import HandlerContext, HandlerResult
 
 log = get_logger("handlers.lint_vault")
 
@@ -115,15 +113,48 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
                 )
             )
 
+    # Orphan raw-filing detection: _raw/filings/.../<accession>/filing.txt with no
+    # corresponding _analyzed/ entry. These are filings we ingested but never analyzed —
+    # likely a dead-letter victim or a stuck pipeline.
+    raw_filings = ctx.vault_root / "_raw" / "filings"
+    if raw_filings.exists():
+        for form_dir in raw_filings.iterdir():
+            if not form_dir.is_dir():
+                continue
+            for acc_dir in form_dir.iterdir():
+                if not acc_dir.is_dir():
+                    continue
+                analyzed_dir = (
+                    ctx.vault_root / "_analyzed" / "filings" / form_dir.name / acc_dir.name
+                )
+                # Consider analyzed if either triage or analysis artifact exists
+                has_analysis = any(
+                    (analyzed_dir / f).exists()
+                    for f in ("analysis.md", "signals.json", "triage.md", "triage.json")
+                )
+                if not has_analysis:
+                    findings.append(
+                        LintFinding(
+                            severity="warning",
+                            kind="stale_active_note",
+                            path=str(acc_dir.relative_to(ctx.vault_root)),
+                            description=(
+                                "raw filing has no _analyzed/ artifact — "
+                                "possibly dead-lettered or stuck pipeline"
+                            ),
+                        )
+                    )
+    stats["raw_filings_orphaned"] = sum(
+        1 for f in findings if f.kind == "stale_active_note" and "raw filing" in f.description
+    )
+
     report = LintReport(
-        ran_at=datetime.now(timezone.utc).isoformat(),
+        ran_at=et_iso(),
         findings=findings,
         vault_stats=stats,
     )
 
-    report_path = (
-        ctx.vault_root / "journal" / f"{datetime.utcnow().strftime('%Y-%m-%d')}-lint.md"
-    )
+    report_path = ctx.vault_root / "journal" / f"{et_date_str()}-lint.md"
     body_lines = [
         f"# Lint report — {report.ran_at}",
         "",

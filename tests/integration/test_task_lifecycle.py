@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 
 from praxis_core.db.models import Task
 from praxis_core.schemas.artifacts import ValidationResult
@@ -13,15 +9,10 @@ from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.tasks.lifecycle import (
     claim_next_task,
-    extend_lease,
     mark_dead_letter,
-    mark_failed,
-    mark_partial,
     mark_success,
-    release_task,
     requeue_on_rate_limit,
 )
-from praxis_core.vault import conventions as vc
 
 
 @pytest.mark.asyncio
@@ -103,9 +94,7 @@ async def test_resource_lock_blocks_second_claim(db_session) -> None:
     assert t1.resource_key == "company:NVDA"
 
     # Second claim with the first's resource excluded — no task should be available
-    t2 = await claim_next_task(
-        db_session, worker_id="w-2", excluded_resource_keys=["company:NVDA"]
-    )
+    t2 = await claim_next_task(db_session, worker_id="w-2", excluded_resource_keys=["company:NVDA"])
     assert t2 is None
 
 
@@ -195,9 +184,7 @@ async def test_dead_letter_on_max_attempts(db_session) -> None:
     await db_session.commit()
 
     # Simulate attempts==max via direct update
-    await db_session.execute(
-        text("UPDATE tasks SET attempts = 2 WHERE id = :id"), {"id": tid}
-    )
+    await db_session.execute(text("UPDATE tasks SET attempts = 2 WHERE id = :id"), {"id": tid})
     await mark_dead_letter(db_session, tid, "exhausted")
     await db_session.commit()
 
@@ -208,7 +195,7 @@ async def test_dead_letter_on_max_attempts(db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_requeue_on_rate_limit_does_not_count_as_attempt(db_session) -> None:
-    tid = await enqueue_task(
+    await enqueue_task(
         db_session,
         task_type=TaskType.TRIAGE_FILING,
         payload={

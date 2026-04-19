@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -83,9 +82,7 @@ async def test_transition_to_probing_succeeds_when_expired(db_session) -> None:
 async def test_probe_success_clears_state(db_session) -> None:
     rl = RateLimitManager()
     await db_session.execute(
-        text(
-            "UPDATE rate_limit_state SET status='probing', consecutive_hits=3 WHERE id=1"
-        )
+        text("UPDATE rate_limit_state SET status='probing', consecutive_hits=3 WHERE id=1")
     )
     await db_session.commit()
 

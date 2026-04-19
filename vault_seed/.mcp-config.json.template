@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "praxis": {
+      "command": "__UV_BIN__",
+      "args": ["run", "--project", "__REPO_ROOT__", "python", "-m", "services.mcp.server"],
+      "cwd": "__REPO_ROOT__"
+    }
+  }
+}

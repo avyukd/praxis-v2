@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +24,9 @@ def compute_backoff_seconds(consecutive_hits: int) -> int:
     """
     settings = get_settings()
     if consecutive_hits <= 1:
-        return random.randint(settings.rate_limit_initial_backoff_s_min, settings.rate_limit_initial_backoff_s_max)
+        return random.randint(
+            settings.rate_limit_initial_backoff_s_min, settings.rate_limit_initial_backoff_s_max
+        )
     schedule = [900, 1800, 3600]
     idx = min(consecutive_hits - 2, len(schedule) - 1)
     return min(schedule[idx], settings.rate_limit_max_backoff_s)

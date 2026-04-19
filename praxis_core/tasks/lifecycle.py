@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -55,7 +54,9 @@ async def claim_next_task(
 
     resource_clause = ""
     if excluded_resource_keys:
-        resource_clause = "AND (resource_key IS NULL OR resource_key != ALL(:excluded_resource_keys))"
+        resource_clause = (
+            "AND (resource_key IS NULL OR resource_key != ALL(:excluded_resource_keys))"
+        )
         params["excluded_resource_keys"] = excluded_resource_keys
 
     sql = f"""
@@ -220,9 +221,7 @@ async def mark_dead_letter(session: AsyncSession, task_id: uuid.UUID, final_erro
         "attempts": task.attempts,
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }
-    session.add(
-        DeadLetterTask(id=task.id, original_task=original, final_error=final_error[:2000])
-    )
+    session.add(DeadLetterTask(id=task.id, original_task=original, final_error=final_error[:2000]))
     await session.execute(
         text(
             """

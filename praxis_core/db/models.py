@@ -48,9 +48,7 @@ class Task(Base):
     parent_task_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL")
     )
-    depends_on: Mapped[list[uuid.UUID] | None] = mapped_column(
-        ARRAY(UUID(as_uuid=True))
-    )
+    depends_on: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
 
     lease_holder: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

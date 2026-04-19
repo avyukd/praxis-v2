@@ -5,8 +5,7 @@ import json
 import re
 import signal
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 import feedparser
@@ -22,6 +21,7 @@ from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
 from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
+from praxis_core.time_et import et_iso, now_utc
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import atomic_write
 
@@ -78,66 +78,108 @@ async def _http_get(url: str, user_agent: str) -> str:
         return response.text
 
 
-def _parse_accession_from_link(link: str, title: str) -> str | None:
-    for pat in (r"accession-number=(\S+)", r"/(\d{10}-\d{2}-\d{6})"):
-        m = re.search(pat, link)
-        if m:
-            return m.group(1)
+def _parse_accession_from_link(link: str, title: str = "") -> str | None:
+    """Extract accession number in format 0000000000-00-000000.
+
+    Real EDGAR atom feeds use: /Archives/edgar/data/<cik>/<acc-no-dashes>/<acc-dashed>-index.htm
+    Older form: ?accession-number=<acc>
+    Fallback: scan title for accession pattern.
+    """
+    m = re.search(r"(\d{10}-\d{2}-\d{6})", link)
+    if m:
+        return m.group(1)
+    m = re.search(r"accession-number=(\d{10}-\d{2}-\d{6})", link)
+    if m:
+        return m.group(1)
     m = re.search(r"(\d{10}-\d{2}-\d{6})", title)
     if m:
         return m.group(1)
     return None
 
 
+def _parse_accession_from_id_tag(id_tag: str) -> str | None:
+    """EDGAR entry `<id>` is 'urn:tag:sec.gov,2008:accession-number=XXX-XX-XXXXXX'."""
+    m = re.search(r"accession-number=(\d{10}-\d{2}-\d{6})", id_tag)
+    if m:
+        return m.group(1)
+    return None
+
+
 def _parse_cik_from_link(link: str) -> str | None:
-    m = re.search(r"CIK=(\d+)", link)
+    """Handles /Archives/edgar/data/<cik>/ (modern) and ?CIK=<cik> (older)."""
+    m = re.search(r"/Archives/edgar/data/(\d+)/", link)
     if m:
         return m.group(1).zfill(10)
-    m = re.search(r"/cgi-bin/browse-edgar\?.*CIK=([0-9]+)", link)
+    m = re.search(r"[?&]CIK=(\d+)", link)
     if m:
         return m.group(1).zfill(10)
+    return None
+
+
+def _parse_cik_from_title(title: str) -> str | None:
+    """Title like '8-K - Company Name (0001234567) (Filer)'."""
+    m = re.search(r"\((\d{10})\)\s*\(Filer\)", title)
+    if m:
+        return m.group(1)
+    m = re.search(r"\((\d{10})\)", title)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _parse_form_type_from_title(title: str) -> str | None:
+    m = re.match(r"^([\w\-/]+)\s*-\s", title)
+    if m:
+        return m.group(1)
     return None
 
 
 def _parse_ticker_from_entry(entry: dict[str, Any]) -> str | None:
-    # EDGAR atom doesn't reliably carry ticker; we parse title/summary heuristically.
-    title = entry.get("title", "")
-    m = re.search(r"\((\w{1,6})\)", title)
-    if m:
-        t = m.group(1).upper()
-        if t not in {"FORM", "8-K", "10-K", "10-Q", "NT"}:
-            return t
+    # EDGAR atom doesn't carry ticker — ticker resolution happens downstream
+    # via CIK lookup (cik_ticker table, not implemented yet).
+    _ = entry
     return None
 
 
 def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
+    """Parse EDGAR atom feed into EdgarFiling records.
+
+    Uses multiple fallback strategies for each field — real EDGAR URLs/titles
+    have changed multiple times over the years.
+    """
     feed = feedparser.parse(content)
     out: list[EdgarFiling] = []
     for entry in feed.entries:
         raw_title = entry.get("title", "")
         raw_link = entry.get("link", "")
+        raw_id = entry.get("id", "")
         title: str = raw_title if isinstance(raw_title, str) else str(raw_title or "")
         link: str = raw_link if isinstance(raw_link, str) else str(raw_link or "")
-        accession = _parse_accession_from_link(link, title)
+        id_tag: str = raw_id if isinstance(raw_id, str) else str(raw_id or "")
+
+        accession = (
+            _parse_accession_from_link(link, title)
+            or _parse_accession_from_id_tag(id_tag)
+        )
         if not accession:
             continue
-        form = title.split(" ", 1)[0].strip()
+
+        form = _parse_form_type_from_title(title) or title.split(" ", 1)[0].strip()
         if form_filter and form not in form_filter:
             continue
-        cik = _parse_cik_from_link(link) or ""
+
+        cik = _parse_cik_from_link(link) or _parse_cik_from_title(title) or ""
         ticker = _parse_ticker_from_entry(dict(entry))
         published_raw_any = entry.get("updated") or entry.get("published")
-        published_raw = (
-            published_raw_any if isinstance(published_raw_any, str) else None
-        )
+        published_raw = published_raw_any if isinstance(published_raw_any, str) else None
         try:
             published = (
                 datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
                 if published_raw
-                else datetime.now(timezone.utc)
+                else now_utc()
             )
         except (ValueError, AttributeError):
-            published = datetime.now(timezone.utc)
+            published = now_utc()
         out.append(
             EdgarFiling(
                 accession=accession,
@@ -180,20 +222,24 @@ async def _ingest_filing(filing: EdgarFiling) -> bool:
         "ticker": filing.ticker,
         "title": filing.title,
         "link": filing.link,
-        "published": filing.published.isoformat(),
-        "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "published": et_iso(filing.published),
+        "ingested_at": et_iso(),
     }
     atomic_write(meta_json, json.dumps(meta, indent=2))
 
     rel_raw = str(filing_txt.relative_to(settings.vault_root))
     async with session_scope() as session:
-        stmt = insert(Source).values(
-            dedup_key=f"filing:{filing.accession}",
-            source_type=f"filing_{filing.form_type.lower().replace('-', '_')}",
-            vault_path=rel_raw,
-            ticker=filing.ticker,
-            extra=meta,
-        ).on_conflict_do_nothing(index_elements=[Source.dedup_key])
+        stmt = (
+            insert(Source)
+            .values(
+                dedup_key=f"filing:{filing.accession}",
+                source_type=f"filing_{filing.form_type.lower().replace('-', '_')}",
+                vault_path=rel_raw,
+                ticker=filing.ticker,
+                extra=meta,
+            )
+            .on_conflict_do_nothing(index_elements=[Source.dedup_key])
+        )
         await session.execute(stmt)
 
         priority = 0  # P0 for Monday filings
@@ -251,7 +297,11 @@ async def poll_once() -> int:
 async def run_loop() -> None:
     configure_logging()
     settings = get_settings()
-    log.info("edgar.start", interval_s=settings.edgar_poll_interval_s, forms=settings.edgar_form_types_list)
+    log.info(
+        "edgar.start",
+        interval_s=settings.edgar_poll_interval_s,
+        forms=settings.edgar_form_types_list,
+    )
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -263,17 +313,17 @@ async def run_loop() -> None:
             count = await poll_once()
             await beat(
                 "pollers.edgar_8k",
-                status={"last_poll_at": datetime.now(timezone.utc).isoformat(), "ingested": count},
+                status={"last_poll_at": et_iso(), "ingested": count},
             )
         except Exception as e:
             log.exception("edgar.loop_error", error=str(e))
             await beat(
                 "pollers.edgar_8k",
-                status={"last_poll_at": datetime.now(timezone.utc).isoformat(), "error": str(e)[:200]},
+                status={"last_poll_at": et_iso(), "error": str(e)[:200]},
             )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=settings.edgar_poll_interval_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     log.info("edgar.shutdown")

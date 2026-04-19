@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
+from handlers import HandlerContext, HandlerResult
 from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import RefreshIndexPayload
-from praxis_core.schemas.task_types import TaskModel
+from praxis_core.time_et import et_iso
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import atomic_write
-
-from handlers import HandlerContext, HandlerResult
 
 log = get_logger("handlers.refresh_index")
 
@@ -20,9 +18,11 @@ def _collect_nodes(vault_root: Path) -> dict[str, list[str]]:
             return []
         return sorted(p.relative_to(vault_root).as_posix() for p in dir_path.glob(pattern))
 
-    companies = sorted(
-        (vault_root / "companies").glob("*/notes.md")
-    ) if (vault_root / "companies").exists() else []
+    companies = (
+        sorted((vault_root / "companies").glob("*/notes.md"))
+        if (vault_root / "companies").exists()
+        else []
+    )
 
     return {
         "companies": [p.relative_to(vault_root).as_posix() for p in companies],
@@ -57,7 +57,7 @@ def _render_index(nodes: dict[str, list[str]], ran_at: str) -> str:
 async def handle(ctx: HandlerContext) -> HandlerResult:
     payload = RefreshIndexPayload.model_validate(ctx.payload)
     nodes = _collect_nodes(ctx.vault_root)
-    ran_at = datetime.now(timezone.utc).isoformat()
+    ran_at = et_iso()
     content = _render_index(nodes, ran_at)
     atomic_write(vc.index_path(ctx.vault_root), content)
     log.info(

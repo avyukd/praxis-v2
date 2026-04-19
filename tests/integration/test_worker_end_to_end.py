@@ -2,18 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from handlers import HandlerContext
 from praxis_core.config import get_settings
-from praxis_core.llm.invoker import LLMResult
-from praxis_core.schemas.task_types import TaskType
-from praxis_core.tasks.enqueue import enqueue_task
-from praxis_core.tasks.lifecycle import claim_next_task
 from praxis_core.vault import conventions as vc
-
-from handlers import HandlerContext, HandlerResult
 
 
 def _make_triage_artifacts(vault_root: Path, accession: str) -> None:
@@ -87,16 +81,15 @@ async def test_lint_vault_handler_generates_report(vault_root: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_generate_daily_journal_empty(vault_root: Path, db_session) -> None:
-    from handlers.generate_daily_journal import handle
-    from praxis_core.db.session import reset_sessionmaker
-
     # Repoint sessionmaker at test DB
     import os
+
+    from handlers.generate_daily_journal import handle
+    from praxis_core.db.session import reset_sessionmaker
 
     os.environ["DATABASE_URL"] = os.environ["PRAXIS_TEST_DATABASE_URL"].replace(
         "postgresql://", "postgresql+asyncpg://"
     )
-    from praxis_core.config import get_settings
 
     get_settings.cache_clear() if hasattr(get_settings, "cache_clear") else None
     reset_sessionmaker()

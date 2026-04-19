@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class TriageFilingPayload(BaseModel):
@@ -82,6 +81,15 @@ class GenerateDailyJournalPayload(BaseModel):
     triggered_by: str = "scheduler"
 
 
+class RateLimitProbePayload(BaseModel):
+    triggered_by: str = "dispatcher"
+
+
+class CleanupSessionsPayload(BaseModel):
+    min_age_hours: int = 24
+    triggered_by: str = "scheduler"
+
+
 PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "triage_filing": TriageFilingPayload,
     "analyze_filing": AnalyzeFilingPayload,
@@ -95,6 +103,8 @@ PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "refresh_index": RefreshIndexPayload,
     "lint_vault": LintVaultPayload,
     "generate_daily_journal": GenerateDailyJournalPayload,
+    "rate_limit_probe": RateLimitProbePayload,
+    "cleanup_sessions": CleanupSessionsPayload,
 }
 
 

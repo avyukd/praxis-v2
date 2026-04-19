@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from praxis_core.tasks.validators import validate_lint_vault, validate_refresh_index

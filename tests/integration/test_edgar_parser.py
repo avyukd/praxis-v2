@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from services.pollers.edgar_8k import _parse_feed, _parse_accession_from_link
-
+from services.pollers.edgar_8k import _parse_accession_from_link, _parse_feed
 
 SAMPLE_ATOM = """<?xml version="1.0" encoding="ISO-8859-1" ?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -25,7 +24,10 @@ def test_parse_accession_from_link_via_query() -> None:
 
 
 def test_parse_accession_from_title() -> None:
-    assert _parse_accession_from_link("https://x", "Accession 0001045810-26-000047 Filed") == "0001045810-26-000047"
+    assert (
+        _parse_accession_from_link("https://x", "Accession 0001045810-26-000047 Filed")
+        == "0001045810-26-000047"
+    )
 
 
 def test_parse_feed_extracts_filing() -> None:

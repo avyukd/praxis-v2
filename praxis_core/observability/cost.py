@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func, select
@@ -9,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxis_core.db.models import Task
 from praxis_core.llm.invoker import LLMResult
+from praxis_core.time_et import now_et
 
 
 def build_telemetry(result: LLMResult) -> dict[str, Any]:
@@ -38,7 +38,8 @@ async def record_task_telemetry(
 async def today_cost_rollup(session: AsyncSession) -> dict[str, Any]:
     from sqlalchemy import Numeric, cast
 
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # "Today" is the current ET calendar day; clamp to ET midnight.
+    today_start = now_et().replace(hour=0, minute=0, second=0, microsecond=0)
     stmt = (
         select(
             Task.type,

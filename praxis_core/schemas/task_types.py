@@ -17,6 +17,7 @@ class TaskType(StrEnum):
     LINT_VAULT = "lint_vault"
     GENERATE_DAILY_JOURNAL = "generate_daily_journal"
     RATE_LIMIT_PROBE = "rate_limit_probe"
+    CLEANUP_SESSIONS = "cleanup_sessions"
 
 
 class TaskStatus(StrEnum):
@@ -50,6 +51,7 @@ MODEL_TIERS: dict[TaskType, TaskModel] = {
     TaskType.LINT_VAULT: TaskModel.SONNET,
     TaskType.GENERATE_DAILY_JOURNAL: TaskModel.HAIKU,
     TaskType.RATE_LIMIT_PROBE: TaskModel.HAIKU,
+    TaskType.CLEANUP_SESSIONS: TaskModel.NONE,
 }
 
 
@@ -67,6 +69,7 @@ TASK_RESOURCE_KEYS: dict[TaskType, str | None] = {
     TaskType.LINT_VAULT: "lint",
     TaskType.GENERATE_DAILY_JOURNAL: "journal",
     TaskType.RATE_LIMIT_PROBE: None,
+    TaskType.CLEANUP_SESSIONS: "cleanup",
 }
 
 

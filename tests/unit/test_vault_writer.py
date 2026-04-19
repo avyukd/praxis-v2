@@ -32,7 +32,9 @@ def test_atomic_write_leaves_no_tempfile_on_success(tmp_path: Path) -> None:
     assert residual == []
 
 
-def test_atomic_write_cleans_up_tempfile_on_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_atomic_write_cleans_up_tempfile_on_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     target = tmp_path / "file.md"
 
     original_replace = os.replace

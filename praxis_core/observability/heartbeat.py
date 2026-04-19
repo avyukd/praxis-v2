@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,10 +17,12 @@ log = get_logger("observability.heartbeat")
 
 
 async def beat(component: str, status: dict[str, Any] | None = None) -> None:
+    from praxis_core.time_et import now_utc
+
     async with session_scope() as session:
         stmt = insert(Heartbeat).values(
             component=component,
-            last_heartbeat=datetime.now(timezone.utc),
+            last_heartbeat=now_utc(),
             status=status,
         )
         stmt = stmt.on_conflict_do_update(
@@ -50,8 +52,10 @@ async def heartbeat_loop(
             log.info("heartbeat.loop.stop", component=component)
             return
         try:
-            await asyncio.wait_for(stop_event.wait() if stop_event else _forever(), timeout=interval_s)
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(
+                stop_event.wait() if stop_event else _forever(), timeout=interval_s
+            )
+        except TimeoutError:
             continue
 
 
@@ -63,7 +67,9 @@ async def _forever() -> None:
 async def stale_components(
     session: AsyncSession, stale_after_s: int = 120
 ) -> list[tuple[str, datetime, int]]:
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_s)
+    from praxis_core.time_et import now_utc
+
+    cutoff = now_utc() - timedelta(seconds=stale_after_s)
     rows = (
         await session.execute(
             select(Heartbeat.component, Heartbeat.last_heartbeat).where(
@@ -72,7 +78,7 @@ async def stale_components(
         )
     ).all()
     out: list[tuple[str, datetime, int]] = []
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     for component, last in rows:
         staleness = int((now - last).total_seconds())
         out.append((component, last, staleness))

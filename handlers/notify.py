@@ -1,22 +1,18 @@
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
-from sqlalchemy import text
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from handlers import HandlerContext, HandlerResult
 from praxis_core.config import get_settings
 from praxis_core.db.models import SignalFired
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import NotifyPayload
+from praxis_core.time_et import et_iso
 from praxis_core.vault.writer import append_atomic
-
-from handlers import HandlerContext, HandlerResult
 
 log = get_logger("handlers.notify")
 
@@ -60,25 +56,27 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
         log.warning("notify.ntfy_fail", error=str(e), topic=topic_url)
         return HandlerResult(ok=False, message=f"ntfy push failed: {e}")
 
-    async with session_scope() as session:
-        session.add(
-            SignalFired(
-                id=uuid.uuid4(),
-                task_id=uuid.UUID(ctx.task_id),
-                ticker=payload.ticker,
-                signal_type=payload.signal_type,
-                urgency=payload.urgency,
-                payload={
-                    "title": payload.title,
-                    "body": payload.body,
-                    "linked_analysis_path": payload.linked_analysis_path,
-                },
-            )
-        )
+    signal = SignalFired(
+        id=uuid.uuid4(),
+        task_id=uuid.UUID(ctx.task_id),
+        ticker=payload.ticker,
+        signal_type=payload.signal_type,
+        urgency=payload.urgency,
+        payload={
+            "title": payload.title,
+            "body": payload.body,
+            "linked_analysis_path": payload.linked_analysis_path,
+        },
+    )
+    if ctx.session is not None:
+        ctx.session.add(signal)
+    else:
+        async with session_scope() as s:
+            s.add(signal)
 
     log_file = ctx.vault_root / "_analyzed" / "notify.log"
     line = (
-        f"{datetime.now(timezone.utc).isoformat()} "
+        f"{et_iso()} "
         f"{payload.urgency} {payload.signal_type} "
         f"{payload.ticker or '-'} {payload.title}\n"
     )

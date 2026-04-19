@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
+from handlers import HandlerContext, HandlerResult
+from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
 from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import TriageFilingPayload
 from praxis_core.schemas.task_types import TaskModel
 from praxis_core.vault import conventions as vc
-
-from handlers import HandlerContext, HandlerResult
-from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
 
 log = get_logger("handlers.triage_filing")
 

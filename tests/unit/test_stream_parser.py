@@ -16,7 +16,10 @@ def test_parses_happy_path() -> None:
         parser,
         [
             {"type": "system", "subtype": "init", "session_id": "abc"},
-            {"type": "assistant", "message": {"content": [{"type": "text", "text": "Thinking..."}]}},
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Thinking..."}]},
+            },
             {
                 "type": "result",
                 "subtype": "success",

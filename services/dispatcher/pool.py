@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from praxis_core.db.models import Task
 from praxis_core.logging import get_logger
@@ -70,8 +69,10 @@ class WorkerPool:
             return
         log.info("pool.drain.start", pending=len(pending), timeout_s=timeout_s)
         try:
-            await asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), timeout=timeout_s)
-        except asyncio.TimeoutError:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True), timeout=timeout_s
+            )
+        except TimeoutError:
             for t in pending:
                 if not t.done():
                     t.cancel()

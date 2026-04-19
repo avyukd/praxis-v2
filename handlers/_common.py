@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from praxis_core.llm.invoker import LLMInvoker, LLMResult, get_invoker
@@ -19,7 +18,7 @@ async def run_llm(
 ) -> LLMResult:
     invoker: LLMInvoker = get_invoker()
     mcp_cfg = _mcp_config_for_vault(vault_root)
-    return invoker.run(
+    return await invoker.run(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         model=model,

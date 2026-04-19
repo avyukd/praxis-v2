@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +11,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import desc, func, select
 
 from praxis_core.config import get_settings
-from praxis_core.db.models import Event, Heartbeat, Investigation, RateLimitState, SignalFired, Task
-from praxis_core.db.session import get_sessionmaker, session_scope
+from praxis_core.db.models import Event, Heartbeat, Investigation, SignalFired, Task
+from praxis_core.db.session import session_scope
 from praxis_core.llm.rate_limit import RateLimitManager
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.cost import today_cost_rollup
 from praxis_core.observability.heartbeat import beat
+from praxis_core.time_et import et_iso, now_utc
 
 log = get_logger("dashboard.app")
 
@@ -30,12 +31,12 @@ async def lifespan(app: FastAPI):
     async def _hb():
         while not stop.is_set():
             try:
-                await beat("dashboard.app", status={"alive_at": datetime.now(timezone.utc).isoformat()})
+                await beat("dashboard.app", status={"alive_at": et_iso()})
             except Exception as e:
                 log.warning("dashboard.heartbeat_fail", error=str(e))
             try:
                 await asyncio.wait_for(stop.wait(), timeout=60)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
 
     task = asyncio.create_task(_hb())
@@ -43,7 +44,7 @@ async def lifespan(app: FastAPI):
     stop.set()
     try:
         await asyncio.wait_for(task, timeout=5)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         task.cancel()
 
 
@@ -52,7 +53,7 @@ app = FastAPI(title="praxis-v2 dashboard", lifespan=lifespan)
 
 @app.get("/api/health", response_class=JSONResponse)
 async def health() -> dict[str, Any]:
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     async with session_scope() as session:
         rows = (
             await session.execute(
@@ -67,7 +68,7 @@ async def health() -> dict[str, Any]:
         out.append(
             {
                 "component": r.component,
-                "last_heartbeat": r.last_heartbeat.isoformat(),
+                "last_heartbeat": et_iso(r.last_heartbeat),
                 "age_s": age,
                 "stale": age > 120,
                 "status": r.status,
@@ -106,7 +107,7 @@ async def tasks_summary() -> dict[str, Any]:
     for status, task_type, count in by_status_type:
         summary.setdefault(status, {})[task_type] = int(count)
 
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     oldest = [
         {
             "type": t,
@@ -119,7 +120,7 @@ async def tasks_summary() -> dict[str, Any]:
             "id": str(r.id),
             "type": r.type,
             "last_error": r.last_error[:300] if r.last_error else None,
-            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "finished_at": et_iso(r.finished_at) if r.finished_at else None,
         }
         for r in recent_failed
     ]
@@ -132,9 +133,9 @@ async def rate_limit() -> dict[str, Any]:
         snap = await RateLimitManager().snapshot(session)
     return {
         "status": snap.status,
-        "limited_until_ts": snap.limited_until_ts.isoformat() if snap.limited_until_ts else None,
+        "limited_until_ts": et_iso(snap.limited_until_ts) if snap.limited_until_ts else None,
         "consecutive_hits": snap.consecutive_hits,
-        "last_hit_ts": snap.last_hit_ts.isoformat() if snap.last_hit_ts else None,
+        "last_hit_ts": et_iso(snap.last_hit_ts) if snap.last_hit_ts else None,
     }
 
 
@@ -148,14 +149,14 @@ async def cost() -> dict[str, Any]:
 async def events(limit: int = 50) -> list[dict[str, Any]]:
     async with session_scope() as session:
         rows = (
-            await session.execute(
-                select(Event).order_by(desc(Event.ts)).limit(limit)
-            )
-        ).scalars().all()
+            (await session.execute(select(Event).order_by(desc(Event.ts)).limit(limit)))
+            .scalars()
+            .all()
+        )
     return [
         {
             "id": r.id,
-            "ts": r.ts.isoformat(),
+            "ts": et_iso(r.ts),
             "component": r.component,
             "event_type": r.event_type,
             "payload": r.payload,
@@ -166,23 +167,27 @@ async def events(limit: int = 50) -> list[dict[str, Any]]:
 
 @app.get("/api/signals", response_class=JSONResponse)
 async def signals(hours: int = 24, limit: int = 50) -> list[dict[str, Any]]:
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since = now_utc() - timedelta(hours=hours)
     async with session_scope() as session:
         rows = (
-            await session.execute(
-                select(SignalFired)
-                .where(SignalFired.fired_at >= since)
-                .order_by(desc(SignalFired.fired_at))
-                .limit(limit)
+            (
+                await session.execute(
+                    select(SignalFired)
+                    .where(SignalFired.fired_at >= since)
+                    .order_by(desc(SignalFired.fired_at))
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return [
         {
             "id": str(r.id),
             "ticker": r.ticker,
             "signal_type": r.signal_type,
             "urgency": r.urgency,
-            "fired_at": r.fired_at.isoformat(),
+            "fired_at": et_iso(r.fired_at),
             "payload": r.payload,
         }
         for r in rows
@@ -193,10 +198,16 @@ async def signals(hours: int = 24, limit: int = 50) -> list[dict[str, Any]]:
 async def investigations(limit: int = 50) -> list[dict[str, Any]]:
     async with session_scope() as session:
         rows = (
-            await session.execute(
-                select(Investigation).order_by(desc(Investigation.last_progress_at)).limit(limit)
+            (
+                await session.execute(
+                    select(Investigation)
+                    .order_by(desc(Investigation.last_progress_at))
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return [
         {
             "id": str(r.id),
@@ -205,7 +216,7 @@ async def investigations(limit: int = 50) -> list[dict[str, Any]]:
             "scope": r.scope,
             "hypothesis": r.hypothesis,
             "entry_nodes": r.entry_nodes,
-            "last_progress_at": r.last_progress_at.isoformat() if r.last_progress_at else None,
+            "last_progress_at": et_iso(r.last_progress_at) if r.last_progress_at else None,
         }
         for r in rows
     ]

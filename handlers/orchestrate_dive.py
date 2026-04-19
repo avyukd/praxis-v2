@@ -1,22 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
+import uuid
 
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
+from handlers import HandlerContext, HandlerResult
+from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
 from praxis_core.db.models import Investigation
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import OrchestrateDivePayload
 from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import enqueue_task
+from praxis_core.time_et import et_date_str, et_iso
 from praxis_core.vault import conventions as vc
-from praxis_core.vault.writer import atomic_write, write_markdown_with_frontmatter
-
-from handlers import HandlerContext, HandlerResult
-from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
+from praxis_core.vault.writer import write_markdown_with_frontmatter
 
 log = get_logger("handlers.orchestrate_dive")
 
@@ -49,7 +47,7 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
     payload = OrchestrateDivePayload.model_validate(ctx.payload)
 
     inv_path = vc.investigation_path(ctx.vault_root, payload.investigation_handle)
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = et_iso()
 
     company_notes = vc.company_notes_path(ctx.vault_root, payload.ticker)
     notes_excerpt = ""
@@ -101,11 +99,9 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
     if result.finish_reason == "rate_limit":
         return HandlerResult(ok=False, llm_result=result, message="rate_limit")
 
-    # Regardless of what the LLM did, ensure investigation record exists in DB + a dummy file
-    # so downstream dispatcher can enqueue specialists. In the real flow the LLM wrote the file.
-    async with session_scope() as session:
+    async def _ensure_investigation(s) -> None:
         inv = (
-            await session.execute(
+            await s.execute(
                 select(Investigation).where(Investigation.handle == payload.investigation_handle)
             )
         ).scalar_one_or_none()
@@ -115,11 +111,18 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
                 status="active",
                 scope="company",
                 initiated_by="orchestrator",
-                hypothesis="Deep dive into {}".format(payload.ticker),
+                hypothesis=f"Deep dive into {payload.ticker}",
                 entry_nodes=[f"companies/{payload.ticker}"],
                 vault_path=str(inv_path.relative_to(ctx.vault_root)),
             )
-            session.add(inv)
+            s.add(inv)
+
+    # Ensure investigation record exists, using worker session if passed
+    if ctx.session is not None:
+        await _ensure_investigation(ctx.session)
+    else:
+        async with session_scope() as session:
+            await _ensure_investigation(session)
 
     # Ensure the investigation file exists even if the LLM didn't write it
     if not inv_path.exists():
@@ -165,22 +168,22 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
                 "ticker": payload.ticker,
                 "investigation_handle": payload.investigation_handle,
                 "thesis_handle": payload.thesis_handle,
-                "memo_handle": f"{payload.ticker.lower()}-dive-{datetime.utcnow().strftime('%Y%m%d')}",
+                "memo_handle": f"{payload.ticker.lower()}-dive-{et_date_str().replace('-', '')}",
             },
         ),
     ]
 
-    async with session_scope() as session:
+    async def _enqueue_sequence(s) -> None:
         inv = (
-            await session.execute(
+            await s.execute(
                 select(Investigation).where(Investigation.handle == payload.investigation_handle)
             )
         ).scalar_one()
-        prior = None
+        prior: uuid.UUID | None = None
         for task_type, sub_payload in plan_sequence:
             dep = [prior] if prior else None
             new_id = await enqueue_task(
-                session,
+                s,
                 task_type=task_type,
                 payload=sub_payload,
                 priority=2,  # P2: Loop B dive lane
@@ -190,5 +193,11 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
             )
             if new_id:
                 prior = new_id
+
+    if ctx.session is not None:
+        await _enqueue_sequence(ctx.session)
+    else:
+        async with session_scope() as session:
+            await _enqueue_sequence(session)
 
     return HandlerResult(ok=True, llm_result=result)

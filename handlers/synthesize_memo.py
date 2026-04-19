@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from sqlalchemy import select
 
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from handlers import HandlerContext, HandlerResult
+from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
 from praxis_core.db.models import Investigation
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import SynthesizeMemoPayload
 from praxis_core.schemas.task_types import TaskModel
+from praxis_core.time_et import now_utc
 from praxis_core.vault import conventions as vc
-
-from handlers import HandlerContext, HandlerResult
-from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
 
 log = get_logger("handlers.synthesize_memo")
 
@@ -81,23 +78,27 @@ If the notes are thin, the memo should be short and decisively Neutral or Too Ha
     )
 
     # Mark investigation resolved regardless of LLM success — validator will catch incomplete work
+    async def _update_investigation(s) -> None:
+        inv = (
+            await s.execute(
+                select(Investigation).where(Investigation.handle == payload.investigation_handle)
+            )
+        ).scalar_one_or_none()
+        if inv and result.finish_reason in ("stop", "max_turns"):
+            inv.status = "resolved"
+            inv.resolved_at = now_utc()  # DB field — UTC is the storage format
+            existing = list(inv.artifacts or [])
+            rel = str(memo_path.relative_to(ctx.vault_root))
+            if rel not in existing:
+                existing.append(rel)
+            inv.artifacts = existing
+
     if payload.investigation_handle:
-        async with session_scope() as session:
-            inv = (
-                await session.execute(
-                    select(Investigation).where(
-                        Investigation.handle == payload.investigation_handle
-                    )
-                )
-            ).scalar_one_or_none()
-            if inv and result.finish_reason in ("stop", "max_turns"):
-                inv.status = "resolved"
-                inv.resolved_at = datetime.now(timezone.utc)
-                existing = list(inv.artifacts or [])
-                rel = str(memo_path.relative_to(ctx.vault_root))
-                if rel not in existing:
-                    existing.append(rel)
-                inv.artifacts = existing
+        if ctx.session is not None:
+            await _update_investigation(ctx.session)
+        else:
+            async with session_scope() as session:
+                await _update_investigation(session)
 
     log.info(
         "synthesize_memo.done",

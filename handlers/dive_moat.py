@@ -3,7 +3,6 @@ from __future__ import annotations
 from handlers import HandlerContext, HandlerResult
 from handlers._dive_base import run_dive
 
-
 FOCUS = """
 Focus: Moat
 - What is the source of durable competitive advantage? (intangibles, switching costs,

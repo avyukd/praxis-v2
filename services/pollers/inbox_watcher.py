@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import re
 import signal
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert
 
@@ -19,6 +16,7 @@ from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
 from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
+from praxis_core.time_et import et_iso, now_et
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import atomic_write
 
@@ -46,20 +44,25 @@ async def _process_file(file_path: Path) -> bool:
         return False
 
     dedup = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-    dt = datetime.now(timezone.utc)
+    dt = now_et()
     slug = _slugify(file_path.name)
     target = vc.raw_manual_path(settings.vault_root, dt, f"{slug}-{dedup}")
 
     async with session_scope() as session:
-        stmt = insert(Source).values(
-            dedup_key=f"manual:{dedup}",
-            source_type="manual",
-            vault_path=str(target.relative_to(settings.vault_root)),
-            extra={
-                "original_name": file_path.name,
-                "ingested_at": dt.isoformat(),
-            },
-        ).on_conflict_do_nothing(index_elements=[Source.dedup_key]).returning(Source.id)
+        stmt = (
+            insert(Source)
+            .values(
+                dedup_key=f"manual:{dedup}",
+                source_type="manual",
+                vault_path=str(target.relative_to(settings.vault_root)),
+                extra={
+                    "original_name": file_path.name,
+                    "ingested_at": et_iso(dt),
+                },
+            )
+            .on_conflict_do_nothing(index_elements=[Source.dedup_key])
+            .returning(Source.id)
+        )
         row = (await session.execute(stmt)).first()
         was_new = row is not None
 
@@ -79,7 +82,7 @@ async def _process_file(file_path: Path) -> bool:
             "type: source\n"
             f"source_kind: manual\n"
             f"original_name: {file_path.name}\n"
-            f"ingested_at: {dt.isoformat()}\n"
+            f"ingested_at: {et_iso(dt)}\n"
             "---\n\n" + body
         )
 
@@ -138,20 +141,17 @@ async def run_loop(interval_s: int = 10) -> None:
             count = await _scan_once()
             await beat(
                 "pollers.inbox_watcher",
-                status={
-                    "last_scan_at": datetime.now(timezone.utc).isoformat(),
-                    "ingested": count,
-                },
+                status={"last_scan_at": et_iso(), "ingested": count},
             )
         except Exception as e:
             log.exception("inbox.scan_fail", error=str(e))
             await beat(
                 "pollers.inbox_watcher",
-                status={"last_scan_at": datetime.now(timezone.utc).isoformat(), "error": str(e)[:200]},
+                status={"last_scan_at": et_iso(), "error": str(e)[:200]},
             )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     log.info("inbox.shutdown")

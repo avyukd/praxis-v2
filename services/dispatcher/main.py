@@ -3,22 +3,17 @@ from __future__ import annotations
 import asyncio
 import signal
 import uuid
-from datetime import datetime, timezone
-from typing import Any
-
-from sqlalchemy import text
 
 from praxis_core.config import get_settings
-from praxis_core.db.models import Task
 from praxis_core.db.session import session_scope
 from praxis_core.llm.rate_limit import RateLimitManager
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
-from praxis_core.schemas.task_types import MODEL_TIERS, TaskModel, TaskType
+from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.tasks.lifecycle import claim_next_task
-
+from praxis_core.time_et import et_iso, now_utc
 from services.dispatcher.pool import WorkerPool
 from services.dispatcher.worker import execute_task
 
@@ -32,7 +27,7 @@ async def _maybe_launch_probe(pool: WorkerPool) -> None:
         snap = await rate_limiter.snapshot(session)
         if snap.status != "limited":
             return
-        if snap.limited_until_ts is None or snap.limited_until_ts > datetime.now(timezone.utc):
+        if snap.limited_until_ts is None or snap.limited_until_ts > now_utc():
             return
 
         probe_id = uuid.uuid4()
@@ -54,7 +49,6 @@ async def _maybe_launch_probe(pool: WorkerPool) -> None:
 
 
 async def _dispatch_tick(pool: WorkerPool) -> int:
-    settings = get_settings()
     rate_limiter = RateLimitManager()
 
     # 1. Maybe launch probe if limited + expired
@@ -130,7 +124,7 @@ async def run_loop() -> None:
             await beat(
                 "dispatcher.main",
                 status={
-                    "last_tick_at": datetime.now(timezone.utc).isoformat(),
+                    "last_tick_at": et_iso(),
                     "running": len(pool.running_tasks()),
                     "available_slots": pool.available_slots(),
                     "assigned_this_tick": assigned,
@@ -142,7 +136,7 @@ async def run_loop() -> None:
             await beat(
                 "dispatcher.main",
                 status={
-                    "last_tick_at": datetime.now(timezone.utc).isoformat(),
+                    "last_tick_at": et_iso(),
                     "error": str(e)[:200],
                     "tick_count": tick_count,
                 },
@@ -150,7 +144,7 @@ async def run_loop() -> None:
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=settings.dispatcher_tick_interval_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     log.info("dispatcher.shutdown", draining=len(pool.running_tasks()))

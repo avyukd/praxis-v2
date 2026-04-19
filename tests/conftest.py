@@ -46,7 +46,9 @@ async def db_session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
         from sqlalchemy import text
 
         await conn.execute(
-            text("INSERT INTO rate_limit_state (id, status) VALUES (1, 'clear') ON CONFLICT DO NOTHING")
+            text(
+                "INSERT INTO rate_limit_state (id, status) VALUES (1, 'clear') ON CONFLICT DO NOTHING"
+            )
         )
 
     sm = async_sessionmaker(engine, expire_on_commit=False)

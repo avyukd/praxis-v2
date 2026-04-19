@@ -84,13 +84,23 @@ for svc in \
   systemctl enable "${svc}.service"
 done
 
+echo "[bootstrap] seeding vault"
+if [[ ! -f "${VAULT_DIR}/CLAUDE.md" ]]; then
+  su - "${PRAXIS_USER}" -c "cp ${INSTALL_ROOT}/vault_seed/CLAUDE.md ${VAULT_DIR}/CLAUDE.md"
+  su - "${PRAXIS_USER}" -c "cp ${INSTALL_ROOT}/vault_seed/INDEX.md ${VAULT_DIR}/INDEX.md"
+  su - "${PRAXIS_USER}" -c "cp ${INSTALL_ROOT}/vault_seed/LOG.md ${VAULT_DIR}/LOG.md"
+fi
+
+echo "[bootstrap] rendering .mcp-config.json"
+su - "${PRAXIS_USER}" -c "REPO_ROOT=${INSTALL_ROOT} VAULT_ROOT=${VAULT_DIR} UV_BIN=~/.local/bin/uv bash ${INSTALL_ROOT}/infra/render_mcp_config.sh"
+
 echo ""
 echo "[bootstrap] DONE"
 echo ""
 echo "Next steps:"
 echo "  1. Edit ${ETC_DIR}/praxis.env — set DATABASE_URL, VAULT_ROOT=${VAULT_DIR}, INBOX_ROOT=${INBOX_DIR}, NTFY_* topics, SEC_USER_AGENT"
 echo "  2. Initialize restic repo: sudo -u ${PRAXIS_USER} restic -r <repo> init"
-echo "  3. Seed vault: sudo -u ${PRAXIS_USER} cp ${INSTALL_ROOT}/vault_seed/* ${VAULT_DIR}/"
-echo "  4. Log in to Claude CLI: sudo -u ${PRAXIS_USER} claude login"
-echo "  5. Start services: systemctl start 'praxis-*.service'"
-echo "  6. Dashboard: curl localhost:8080/ or open in browser"
+echo "  3. Log in to Claude CLI: sudo -u ${PRAXIS_USER} claude login"
+echo "  4. Start services: systemctl start 'praxis-*.service'"
+echo "  5. Dashboard: curl localhost:8080/ or open in browser"
+echo "  6. Smoke test: bash ${INSTALL_ROOT}/scripts/smoke.sh"

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxis_core.llm.invoker import LLMResult
 
@@ -15,6 +16,10 @@ class HandlerContext(BaseModel):
     payload: dict[str, Any]
     vault_root: Path
     model: str
+    # Worker's session — handlers should use this for DB writes related to task lifecycle
+    # (investigation updates, signal records) so they land in the same transaction
+    # as task status transitions. When None, handlers fall back to their own session_scope.
+    session: AsyncSession | None = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -42,20 +47,14 @@ class HandlerRegistry:
     def get(self, task_type: str) -> HandlerFn | None:
         return self._handlers.get(task_type)
 
-
-_registry = HandlerRegistry()
-
-
-def get_handler_registry() -> HandlerRegistry:
-    """Register all handlers on first access."""
-    if not _registry._handlers:
-        _register_all()
-    return _registry
+    def registered_types(self) -> list[str]:
+        return list(self._handlers.keys())
 
 
-def _register_all() -> None:
+def _build_registry() -> HandlerRegistry:
     from handlers import (
         analyze_filing,
+        cleanup_sessions,
         compile_to_wiki,
         dive_business,
         dive_financials,
@@ -64,20 +63,32 @@ def _register_all() -> None:
         lint_vault,
         notify,
         orchestrate_dive,
+        rate_limit_probe,
         refresh_index,
         synthesize_memo,
         triage_filing,
     )
 
-    _registry.register("triage_filing", triage_filing.handle)
-    _registry.register("analyze_filing", analyze_filing.handle)
-    _registry.register("compile_to_wiki", compile_to_wiki.handle)
-    _registry.register("notify", notify.handle)
-    _registry.register("orchestrate_dive", orchestrate_dive.handle)
-    _registry.register("dive_business", dive_business.handle)
-    _registry.register("dive_moat", dive_moat.handle)
-    _registry.register("dive_financials", dive_financials.handle)
-    _registry.register("synthesize_memo", synthesize_memo.handle)
-    _registry.register("refresh_index", refresh_index.handle)
-    _registry.register("lint_vault", lint_vault.handle)
-    _registry.register("generate_daily_journal", generate_daily_journal.handle)
+    r = HandlerRegistry()
+    r.register("triage_filing", triage_filing.handle)
+    r.register("analyze_filing", analyze_filing.handle)
+    r.register("compile_to_wiki", compile_to_wiki.handle)
+    r.register("notify", notify.handle)
+    r.register("orchestrate_dive", orchestrate_dive.handle)
+    r.register("dive_business", dive_business.handle)
+    r.register("dive_moat", dive_moat.handle)
+    r.register("dive_financials", dive_financials.handle)
+    r.register("synthesize_memo", synthesize_memo.handle)
+    r.register("refresh_index", refresh_index.handle)
+    r.register("lint_vault", lint_vault.handle)
+    r.register("generate_daily_journal", generate_daily_journal.handle)
+    r.register("rate_limit_probe", rate_limit_probe.handle)
+    r.register("cleanup_sessions", cleanup_sessions.handle)
+    return r
+
+
+_registry: HandlerRegistry = _build_registry()
+
+
+def get_handler_registry() -> HandlerRegistry:
+    return _registry

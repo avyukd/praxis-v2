@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import timedelta
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import desc, func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxis_core.config import get_settings
 from praxis_core.db.models import (
-    Event,
     Heartbeat,
     Investigation,
-    RateLimitState,
     SignalFired,
     Source,
     Task,
@@ -28,8 +22,9 @@ from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
+from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault import conventions as vc
-from praxis_core.vault.writer import atomic_write, write_markdown_with_frontmatter
+from praxis_core.vault.writer import atomic_write
 
 log = get_logger("mcp.server")
 mcp = FastMCP("praxis-v2")
@@ -101,7 +96,7 @@ async def search_vault(query: str, limit: int = 10) -> list[dict[str, Any]]:
 @mcp.tool()
 async def list_recent_analyses(hours: int = 24, limit: int = 50) -> list[dict[str, Any]]:
     """List recent analyze_filing tasks that succeeded."""
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since = now_utc() - timedelta(hours=hours)
     async with session_scope() as session:
         rows = (
             await session.execute(
@@ -126,16 +121,20 @@ async def list_recent_analyses(hours: int = 24, limit: int = 50) -> list[dict[st
 
 @mcp.tool()
 async def list_fired_signals(hours: int = 24, limit: int = 50) -> list[dict[str, Any]]:
-    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    since = now_utc() - timedelta(hours=hours)
     async with session_scope() as session:
         rows = (
-            await session.execute(
-                select(SignalFired)
-                .where(SignalFired.fired_at >= since)
-                .order_by(desc(SignalFired.fired_at))
-                .limit(limit)
+            (
+                await session.execute(
+                    select(SignalFired)
+                    .where(SignalFired.fired_at >= since)
+                    .order_by(desc(SignalFired.fired_at))
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return [
         {
             "id": str(r.id),
@@ -196,7 +195,7 @@ async def cancel_task(task_id: str) -> dict[str, Any]:
         if task.status in ("success", "failed", "dead_letter", "canceled"):
             return {"ok": False, "error": f"task already terminal: {task.status}"}
         task.status = "canceled"
-        task.finished_at = datetime.now(timezone.utc)
+        task.finished_at = now_utc()
         task.lease_holder = None
         task.lease_expires_at = None
         await emit_event("mcp.server", "task_cancelled", {"task_id": task_id})
@@ -212,7 +211,9 @@ async def reprioritize(task_id: str, new_priority: int) -> dict[str, Any]:
         if task is None:
             return {"ok": False, "error": "not found"}
         task.priority = new_priority
-        await emit_event("mcp.server", "task_reprioritized", {"task_id": task_id, "priority": new_priority})
+        await emit_event(
+            "mcp.server", "task_reprioritized", {"task_id": task_id, "priority": new_priority}
+        )
     return {"ok": True, "task_id": task_id, "new_priority": new_priority}
 
 
@@ -235,7 +236,9 @@ async def boost_ticker(ticker: str, duration_min: int = 60) -> dict[str, Any]:
         result = await session.execute(stmt)
         affected = len(list(result.scalars().all()))
         await emit_event(
-            "mcp.server", "boost_ticker", {"ticker": ticker, "affected": affected, "duration_min": duration_min}
+            "mcp.server",
+            "boost_ticker",
+            {"ticker": ticker, "affected": affected, "duration_min": duration_min},
         )
     return {"ok": True, "ticker": ticker, "affected": affected}
 
@@ -255,7 +258,7 @@ async def open_investigation(
         return {"ok": False, "error": "provide either ticker or theme"}
 
     handle_base = ticker.lower() if ticker else (theme or "").lower().replace(" ", "-")
-    handle = f"{handle_base}-{datetime.utcnow().strftime('%Y%m%d%H%M')}"
+    handle = f"{handle_base}-{now_et().strftime('%Y%m%d%H%M')}"
     scope = "company" if ticker else "theme"
 
     async with session_scope() as session:
@@ -352,9 +355,7 @@ async def pool_status() -> dict[str, Any]:
             await session.execute(select(Heartbeat).where(Heartbeat.component == "dispatcher.main"))
         ).scalar_one_or_none()
         running = (
-            await session.execute(
-                select(func.count(Task.id)).where(Task.status == "running")
-            )
+            await session.execute(select(func.count(Task.id)).where(Task.status == "running"))
         ).scalar_one()
         queued = (
             await session.execute(
@@ -393,26 +394,25 @@ async def file_to_vault(
 
 
 @mcp.tool()
-async def ingest_source(
-    content: str, title: str, source_hint: str | None = None
-) -> dict[str, Any]:
+async def ingest_source(content: str, title: str, source_hint: str | None = None) -> dict[str, Any]:
     """Ingest human-provided content into _raw/manual/ and enqueue compile."""
     import hashlib
 
     settings = get_settings()
     dedup = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-    dt = datetime.now(timezone.utc)
+    dt = now_et()
     slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", title.lower()).strip("-") or "ingested"
     target = vc.raw_manual_path(settings.vault_root, dt, f"{slug}-{dedup}")
 
     async with session_scope() as session:
         stmt = (
-            __import__("sqlalchemy.dialects.postgresql", fromlist=["insert"]).insert(Source)
+            __import__("sqlalchemy.dialects.postgresql", fromlist=["insert"])
+            .insert(Source)
             .values(
                 dedup_key=f"manual:{dedup}",
                 source_type="manual_ingest",
                 vault_path=str(target.relative_to(settings.vault_root)),
-                extra={"title": title, "source_hint": source_hint, "ingested_at": dt.isoformat()},
+                extra={"title": title, "source_hint": source_hint, "ingested_at": et_iso(dt)},
             )
             .on_conflict_do_nothing(index_elements=[Source.dedup_key])
         )
@@ -424,7 +424,7 @@ async def ingest_source(
         f"source_kind: manual_ingest\n"
         f"title: {title}\n"
         f"source_hint: {source_hint or ''}\n"
-        f"ingested_at: {dt.isoformat()}\n"
+        f"ingested_at: {et_iso(dt)}\n"
         "---\n\n" + content
     )
     atomic_write(target, body)

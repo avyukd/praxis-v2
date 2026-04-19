@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from praxis_core.config import get_settings
 from praxis_core.schemas.artifacts import (
     AnalysisSignals,
     TriageResult,
@@ -15,8 +15,6 @@ from praxis_core.schemas.payloads import (
     AnalyzeFilingPayload,
     CompileToWikiPayload,
     DiveBusinessPayload,
-    DiveFinancialsPayload,
-    DiveMoatPayload,
     GenerateDailyJournalPayload,
     LintVaultPayload,
     NotifyPayload,
@@ -27,7 +25,6 @@ from praxis_core.schemas.payloads import (
 )
 from praxis_core.schemas.task_types import TaskType
 from praxis_core.vault import conventions as vc
-
 
 ValidatorFn = Callable[[dict[str, Any], Path], ValidationResult]
 
@@ -136,7 +133,9 @@ def validate_orchestrate_dive(payload_raw: dict[str, Any], vault_root: Path) -> 
     return ValidationResult(missing=[s])
 
 
-def _validate_dive_generic(payload_raw: dict[str, Any], vault_root: Path, section: str) -> ValidationResult:
+def _validate_dive_generic(
+    payload_raw: dict[str, Any], vault_root: Path, section: str
+) -> ValidationResult:
     payload = DiveBusinessPayload.model_validate(payload_raw)  # same shape for all dive_*
     notes = vc.company_notes_path(vault_root, payload.ticker)
     s, exists = _check_file_exists(notes)
@@ -192,10 +191,10 @@ def validate_refresh_index(payload_raw: dict[str, Any], vault_root: Path) -> Val
 
 
 def validate_lint_vault(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
-    from datetime import datetime
+    from praxis_core.time_et import et_date_str
 
     LintVaultPayload.model_validate(payload_raw)
-    p = vault_root / "journal" / f"{datetime.utcnow().strftime('%Y-%m-%d')}-lint.md"
+    p = vault_root / "journal" / f"{et_date_str()}-lint.md"
     s, exists = _check_file_exists(p)
     if exists:
         return ValidationResult(ok=[s])
@@ -213,6 +212,16 @@ def validate_generate_daily_journal(
     return ValidationResult(missing=[s])
 
 
+def validate_rate_limit_probe(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    # No on-disk artifact required; the worker uses handler's ok/result to drive state machine.
+    return ValidationResult(ok=["probe.completed"])
+
+
+def validate_cleanup_sessions(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    # No on-disk artifact required.
+    return ValidationResult(ok=["cleanup.completed"])
+
+
 VALIDATORS: dict[str, ValidatorFn] = {
     TaskType.TRIAGE_FILING.value: validate_triage_filing,
     TaskType.ANALYZE_FILING.value: validate_analyze_filing,
@@ -226,6 +235,8 @@ VALIDATORS: dict[str, ValidatorFn] = {
     TaskType.REFRESH_INDEX.value: validate_refresh_index,
     TaskType.LINT_VAULT.value: validate_lint_vault,
     TaskType.GENERATE_DAILY_JOURNAL.value: validate_generate_daily_journal,
+    TaskType.RATE_LIMIT_PROBE.value: validate_rate_limit_probe,
+    TaskType.CLEANUP_SESSIONS.value: validate_cleanup_sessions,
 }
 
 

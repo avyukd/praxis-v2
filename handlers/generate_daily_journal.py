@@ -1,26 +1,28 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from praxis_core.db.models import Event, SignalFired, Task
+from handlers import HandlerContext, HandlerResult
+from praxis_core.db.models import SignalFired, Task
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import GenerateDailyJournalPayload
-from praxis_core.vault import conventions as vc
+from praxis_core.time_et import ET
 from praxis_core.vault.writer import atomic_write
-
-from handlers import HandlerContext, HandlerResult
 
 log = get_logger("handlers.generate_daily_journal")
 
 
 async def _summarize_day(session: AsyncSession, date_str: str) -> str:
-    start = datetime.fromisoformat(date_str).replace(tzinfo=timezone.utc)
-    end = start + timedelta(days=1)
+    # date_str is the ET calendar date. Compute the ET day boundaries (midnight to midnight ET),
+    # then convert to UTC for DB queries (columns stored in UTC).
+    et_start = datetime.fromisoformat(date_str).replace(tzinfo=ET)
+    et_end = et_start + timedelta(days=1)
+    start = et_start  # still comparable — sqlalchemy converts tz-aware to UTC
+    end = et_end
 
     task_rows = (
         await session.execute(
@@ -33,7 +35,12 @@ async def _summarize_day(session: AsyncSession, date_str: str) -> str:
 
     signal_rows = (
         await session.execute(
-            select(SignalFired.ticker, SignalFired.signal_type, SignalFired.urgency, SignalFired.payload)
+            select(
+                SignalFired.ticker,
+                SignalFired.signal_type,
+                SignalFired.urgency,
+                SignalFired.payload,
+            )
             .where(SignalFired.fired_at >= start)
             .where(SignalFired.fired_at < end)
             .order_by(SignalFired.fired_at)
@@ -49,7 +56,7 @@ async def _summarize_day(session: AsyncSession, date_str: str) -> str:
     parts = [
         f"# Daily journal — {date_str}",
         "",
-        f"## Activity summary",
+        "## Activity summary",
         "",
     ]
     if not by_type:
@@ -77,8 +84,11 @@ async def _summarize_day(session: AsyncSession, date_str: str) -> str:
 
 async def handle(ctx: HandlerContext) -> HandlerResult:
     payload = GenerateDailyJournalPayload.model_validate(ctx.payload)
-    async with session_scope() as session:
-        body = await _summarize_day(session, payload.date)
+    if ctx.session is not None:
+        body = await _summarize_day(ctx.session, payload.date)
+    else:
+        async with session_scope() as session:
+            body = await _summarize_day(session, payload.date)
 
     out_path = ctx.vault_root / "journal" / f"{payload.date}.md"
     atomic_write(out_path, body)

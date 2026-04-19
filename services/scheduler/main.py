@@ -2,23 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxis_core.config import get_settings
-from praxis_core.db.models import Event, Heartbeat, Task
+from praxis_core.db.models import Heartbeat, Task
 from praxis_core.db.session import session_scope
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat, stale_components
 from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
-
+from praxis_core.time_et import now_et, now_utc
 from services.scheduler.alerts import send_alert
 
 log = get_logger("scheduler.main")
@@ -43,7 +42,7 @@ async def _enqueue_refresh_index(session: AsyncSession) -> None:
         task_type=TaskType.REFRESH_INDEX,
         payload={"scope": "incremental", "triggered_by": "scheduler"},
         priority=4,
-        dedup_key=f"refresh_index:{datetime.utcnow().strftime('%Y%m%d%H')}",
+        dedup_key=f"refresh_index:{now_et().strftime('%Y%m%d%H')}",
     )
 
 
@@ -53,12 +52,13 @@ async def _enqueue_lint_vault(session: AsyncSession) -> None:
         task_type=TaskType.LINT_VAULT,
         payload={"triggered_by": "scheduler"},
         priority=4,
-        dedup_key=f"lint_vault:{datetime.utcnow().strftime('%Y%m%d')}",
+        dedup_key=f"lint_vault:{now_et().strftime('%Y%m%d')}",
     )
 
 
 async def _enqueue_daily_journal(session: AsyncSession) -> None:
-    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+    # Daily journal runs at end of ET day; "yesterday" is the previous ET calendar date.
+    yesterday = (now_et() - timedelta(days=1)).strftime("%Y-%m-%d")
     await enqueue_task(
         session,
         task_type=TaskType.GENERATE_DAILY_JOURNAL,
@@ -68,17 +68,27 @@ async def _enqueue_daily_journal(session: AsyncSession) -> None:
     )
 
 
+async def _enqueue_cleanup_sessions(session: AsyncSession) -> None:
+    await enqueue_task(
+        session,
+        task_type=TaskType.CLEANUP_SESSIONS,
+        payload={"min_age_hours": 24, "triggered_by": "scheduler"},
+        priority=4,
+        dedup_key=f"cleanup_sessions:{now_et().strftime('%Y%m%d')}",
+    )
+
+
 JOBS: list[CadenceJob] = [
     CadenceJob(name="refresh_index", interval_s=3600, action=_enqueue_refresh_index),
     CadenceJob(name="lint_vault", interval_s=86400, action=_enqueue_lint_vault),
     CadenceJob(name="daily_journal", interval_s=86400, action=_enqueue_daily_journal),
+    CadenceJob(name="cleanup_sessions", interval_s=86400, action=_enqueue_cleanup_sessions),
 ]
 
 
 def _is_market_hours() -> bool:
     settings = get_settings()
-    tz = ZoneInfo(settings.market_timezone)
-    now = datetime.now(tz)
+    now = now_et()
     if now.weekday() >= 5:
         return False
     open_h, open_m = [int(x) for x in settings.market_open_et.split(":")]
@@ -91,11 +101,11 @@ def _is_market_hours() -> bool:
 async def _check_dead_man(session: AsyncSession) -> list[str]:
     """Returns list of alert messages (if any)."""
     alerts: list[str] = []
-    now = datetime.now(timezone.utc)
+    now = now_utc()
 
     # Heartbeat staleness
     stale = await stale_components(session, stale_after_s=300)
-    for component, last, age in stale:
+    for component, _last, age in stale:
         if component == "scheduler.main":
             continue
         alerts.append(f"Heartbeat stale: {component} ({age}s old)")
@@ -121,7 +131,9 @@ async def _check_dead_man(session: AsyncSession) -> list[str]:
         edgar_recent = edgar_hb is not None and (now - edgar_hb).total_seconds() < 600
 
         if count == 0 and edgar_recent:
-            alerts.append("No successful analyze_filing in 2hrs during market hours (EDGAR still polling)")
+            alerts.append(
+                "No successful analyze_filing in 2hrs during market hours (EDGAR still polling)"
+            )
 
     # Dispatcher heartbeat older than 2min
     disp_hb = (
@@ -139,7 +151,7 @@ _last_alert_fingerprints: dict[str, datetime] = {}
 
 
 def _should_alert(fingerprint: str, cooldown_s: int = 900) -> bool:
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     last = _last_alert_fingerprints.get(fingerprint)
     if last is None or (now - last).total_seconds() > cooldown_s:
         _last_alert_fingerprints[fingerprint] = now
@@ -149,7 +161,6 @@ def _should_alert(fingerprint: str, cooldown_s: int = 900) -> bool:
 
 async def run_loop() -> None:
     configure_logging()
-    settings = get_settings()
     log.info("scheduler.start")
 
     stop_event = asyncio.Event()
@@ -160,7 +171,7 @@ async def run_loop() -> None:
     await emit_event("scheduler.main", "started", {})
 
     while not stop_event.is_set():
-        now = datetime.now(timezone.utc)
+        now = now_utc()
 
         # Cadence jobs
         async with session_scope() as session:
@@ -188,14 +199,16 @@ async def run_loop() -> None:
         except Exception as e:
             log.exception("scheduler.dead_man_fail", error=str(e))
 
+        from praxis_core.time_et import et_iso
+
         await beat(
             "scheduler.main",
-            status={"last_tick_at": now.isoformat(), "jobs": len(JOBS)},
+            status={"last_tick_at": et_iso(now), "jobs": len(JOBS)},
         )
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=60)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     log.info("scheduler.shutdown")

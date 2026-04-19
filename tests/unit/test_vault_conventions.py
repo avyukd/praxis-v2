@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from praxis_core.time_et import ET
 from praxis_core.vault import conventions as c
 
 
@@ -12,7 +13,9 @@ def test_company_paths(tmp_path: Path) -> None:
     assert c.company_dir(tmp_path, "NVDA") == tmp_path / "companies" / "NVDA"
     assert c.company_notes_path(tmp_path, "nvda") == tmp_path / "companies" / "NVDA" / "notes.md"
     assert c.company_thesis_path(tmp_path, "NVDA") == tmp_path / "companies" / "NVDA" / "thesis.md"
-    assert c.company_journal_path(tmp_path, "NVDA") == tmp_path / "companies" / "NVDA" / "journal.md"
+    assert (
+        c.company_journal_path(tmp_path, "NVDA") == tmp_path / "companies" / "NVDA" / "journal.md"
+    )
 
 
 def test_ticker_validation() -> None:
@@ -41,9 +44,16 @@ def test_analyzed_filing_dir(tmp_path: Path) -> None:
 
 
 def test_memo_paths(tmp_path: Path) -> None:
-    dt = datetime(2026, 4, 18)
-    assert c.company_memo_path(tmp_path, "NVDA", "AI Capex Thesis", dt).name == "2026-04-18-ai-capex-thesis.md"
-    assert c.crosscut_memo_path(tmp_path, "Hormuz Scenarios", dt).name == "2026-04-18-hormuz-scenarios.md"
+    # Use ET-aware datetime — all date conventions are in ET.
+    dt = datetime(2026, 4, 18, 10, 0, tzinfo=ET)
+    assert (
+        c.company_memo_path(tmp_path, "NVDA", "AI Capex Thesis", dt).name
+        == "2026-04-18-ai-capex-thesis.md"
+    )
+    assert (
+        c.crosscut_memo_path(tmp_path, "Hormuz Scenarios", dt).name
+        == "2026-04-18-hormuz-scenarios.md"
+    )
 
 
 def test_investigation_path(tmp_path: Path) -> None:
@@ -52,5 +62,5 @@ def test_investigation_path(tmp_path: Path) -> None:
 
 
 def test_journal_daily(tmp_path: Path) -> None:
-    dt = datetime(2026, 4, 18)
+    dt = datetime(2026, 4, 18, 10, 0, tzinfo=ET)
     assert c.journal_daily_path(tmp_path, dt) == tmp_path / "journal" / "2026-04-18.md"
