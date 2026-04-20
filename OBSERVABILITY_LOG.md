@@ -28,3 +28,5 @@
 2026-04-20T17:50:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 347 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear
 2026-04-20T18:03:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 351 success / 0 queued / 2 running / 47 dl — dl_recent=0 — rl clear
 2026-04-20T18:18:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 354 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear
+2026-04-20T18:55:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 356 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear — new wiki-mgmt handlers live (refresh_backlinks 4h, ticker_index 1h) awaiting first scheduled tick
+2026-04-20T19:12:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 356 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear

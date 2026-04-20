@@ -22,6 +22,7 @@ from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import NotifyPayload, SurfaceIdeasPayload
 from praxis_core.schemas.surfacing import SurfacedIdea
 from praxis_core.schemas.task_types import TaskModel, TaskType
+from praxis_core.tasks.capacity import get_pool_capacity
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault.section_append import append_to_section
@@ -387,6 +388,13 @@ per the schema.{focus_hint}
                     dedup_key=f"notify:surface:{idea.handle}",
                 )
 
+    # Auto-dispatch investigations for surfaced ideas when the dispatcher
+    # has spare capacity (≤80% pool utilization + rate-limit clear). The
+    # analyst should always be busy — surface_ideas → orchestrate_dive
+    # turns "thinking about patterns" into "actually researching them."
+    # Daily cap prevents runaway if the LLM surfaces many similar ideas.
+    await _autodispatch_investigations(kept, batch_md_path, vault_root)
+
     log.info(
         "surface.done",
         task_id=ctx.task_id,
@@ -396,3 +404,131 @@ per the schema.{focus_hint}
         anomalies_dropped=dropped,
     )
     return HandlerResult(ok=True, llm_result=result, message=f"batch={batch_handle} ideas={len(kept)}")
+
+
+# Cap auto-dispatched investigations per UTC day so a pathological surface
+# run can't flood the queue. Ideas-per-day above this cap fall back to
+# ntfy-only behavior.
+AUTODISPATCH_DAILY_CAP = 20
+
+
+async def _count_autodispatched_today(session) -> int:
+    today_prefix = now_et().strftime("%Y-%m-%d")
+    # dedup_key we use for auto-open is "autoinvest:<date>:..."
+    row = await session.execute(
+        text(
+            "SELECT count(*) FROM tasks "
+            "WHERE type='orchestrate_dive' AND dedup_key LIKE :pat "
+        ),
+        {"pat": f"autoinvest:{today_prefix}:%"},
+    )
+    return int(row.scalar_one())
+
+
+async def _autodispatch_investigations(
+    ideas: list[SurfacedIdea], batch_md_path: Path, vault_root: Path
+) -> None:
+    """For each surfaced idea pinned to a clear ticker, open an
+    investigation + enqueue orchestrate_dive when the pool has spare
+    capacity. HIGH urgency dispatches up to spare_slots; MEDIUM only
+    when utilization < 50% (half the pool). Cross-ticker patterns with
+    ≤3 tickers fan out one investigation per ticker."""
+    if not ideas:
+        return
+
+    async with session_scope() as session:
+        cap = await get_pool_capacity(session)
+        already_today = await _count_autodispatched_today(session)
+
+    if cap.at_capacity:
+        log.info(
+            "surface.autodispatch.skip_capacity",
+            running=cap.running,
+            pool_size=cap.pool_size,
+            utilization=cap.utilization,
+            rl_clear=cap.rate_limit_clear,
+        )
+        return
+    if already_today >= AUTODISPATCH_DAILY_CAP:
+        log.info("surface.autodispatch.skip_daily_cap", count=already_today)
+        return
+
+    # Pick the set of (idea, ticker) candidates to dispatch this run.
+    candidates: list[tuple[SurfacedIdea, str]] = []
+    for idea in ideas:
+        tickers = [t for t in (idea.tickers or []) if t and t != "UNKNOWN"]
+        if not tickers or len(tickers) > 3:
+            continue
+        if idea.urgency == "high":
+            for t in tickers:
+                candidates.append((idea, t))
+        elif idea.urgency == "medium" and cap.utilization < 0.5:
+            # Medium ideas only when the pool is <50% loaded
+            for t in tickers:
+                candidates.append((idea, t))
+
+    if not candidates:
+        return
+
+    # Respect capacity (spare slots for HIGH-urgency live-path buffer)
+    # and daily cap.
+    remaining = min(cap.spare_slots, AUTODISPATCH_DAILY_CAP - already_today)
+    candidates = candidates[: max(0, remaining)]
+
+    if not candidates:
+        log.info("surface.autodispatch.no_slots", spare=cap.spare_slots)
+        return
+
+    # Defer imports to avoid circular / heavy imports at module load
+    from praxis_core.db.models import Investigation
+
+    opened = 0
+    async with session_scope() as session:
+        for idea, ticker in candidates:
+            handle = (
+                f"{ticker.lower()}-surfaced-{now_et().strftime('%Y%m%d%H%M')}-{idea.handle[:8]}"
+            )
+            dedup_key = f"autoinvest:{now_et().strftime('%Y-%m-%d')}:{handle}"
+            existing = (
+                await session.execute(
+                    select(Investigation).where(Investigation.handle == handle)
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                continue
+            hypothesis = f"Surfaced ({idea.idea_type}, {idea.urgency}): {idea.summary[:240]}"
+            inv = Investigation(
+                handle=handle,
+                status="active",
+                scope="company",
+                initiated_by="surface_ideas",
+                hypothesis=hypothesis,
+                entry_nodes=[f"companies/{ticker}"],
+                vault_path=f"investigations/{handle}.md",
+                research_priority=7 if idea.urgency == "high" else 5,
+            )
+            session.add(inv)
+            await session.flush()
+            await enqueue_task(
+                session,
+                task_type=TaskType.ORCHESTRATE_DIVE,
+                payload={
+                    "ticker": ticker.upper(),
+                    "investigation_handle": handle,
+                    "thesis_handle": None,
+                    "research_priority": inv.research_priority,
+                },
+                priority=2,
+                dedup_key=dedup_key,
+                investigation_id=inv.id,
+            )
+            opened += 1
+            log.info(
+                "surface.autodispatch.opened",
+                ticker=ticker,
+                urgency=idea.urgency,
+                idea_type=idea.idea_type,
+                handle=handle,
+            )
+
+    log.info("surface.autodispatch.summary", opened=opened, capped_at=remaining)

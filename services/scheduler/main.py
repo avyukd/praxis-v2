@@ -121,8 +121,12 @@ JOBS: list[CadenceJob] = [
     CadenceJob(name="lint_vault", interval_s=86400, action=_enqueue_lint_vault),
     CadenceJob(name="daily_journal", interval_s=86400, action=_enqueue_daily_journal),
     CadenceJob(name="cleanup_sessions", interval_s=86400, action=_enqueue_cleanup_sessions),
-    # Section D D45 — 24/7, every 30min (off-hours ideation is the point)
-    CadenceJob(name="surface_ideas", interval_s=1800, action=_enqueue_surface_ideas),
+    # Surface ideas runs every 15 min — it's the engine of auto-dispatch
+    # (high-urgency single-ticker ideas → orchestrate_dive), so the faster
+    # we scan for new patterns, the sooner spare worker capacity gets
+    # filled with research. Raw cost is ~$0.30/call (Sonnet) → ~$30/day
+    # at 15min cadence, acceptable for the "always-busy analyst" property.
+    CadenceJob(name="surface_ideas", interval_s=900, action=_enqueue_surface_ideas),
     # Wiki-connectivity refresh — graph traversal + orphan resolver
     CadenceJob(name="refresh_backlinks", interval_s=14400, action=_enqueue_refresh_backlinks),
     CadenceJob(name="ticker_index", interval_s=3600, action=_enqueue_ticker_index),
