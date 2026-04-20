@@ -24,3 +24,5 @@
 2026-04-20T16:48:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 295 success / 6 queued / 4 running / 47 dl — PARALLEL DIVES LIVE: 4 running simultaneously (2 old-style company:BTO/OCS from pre-config-change, 2 new-style empty resource_key → true parallel). Pool saturated at 4/4 workers — parallelism working as designed. rl clear.
 2026-04-20T17:06:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 317 success / 0 queued / 2 running / 47 dl — dl_recent=0 — BTO END-TO-END COMPLETE: all 6 parallel dives (6-14KB each) + fresh synthesize_memo with required "## Dive cross-check" section landed. Decision: Neutral. New architecture fully verified. rl clear.
 2026-04-20T17:20:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 329 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear — pipeline idle (quiet pre-close)
+2026-04-20T17:35:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 338 success / 0 queued / 1 running / 47 dl — dl_recent=0 — rl clear
+2026-04-20T17:50:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 347 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear

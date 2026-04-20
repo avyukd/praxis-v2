@@ -2580,26 +2580,26 @@ review during D61 MIGRATION.md rewrite.
 - [x] D53-D61 decisions locked in
 - [ ] Open items OE1-OE3 resolved (need Avyuk call if non-default wanted;
       defaults are in the "Propose:" bullets above)
-- [ ] `vault_seed/CLAUDE.md` rewritten for Section A-D conventions
-- [ ] workspace_migrator: dives/ rename + full 7-specialist mapping
-- [ ] vault_migrator: seed CLAUDE.md / INDEX.md / LOG.md during apply
-- [ ] Validator strengthened (frontmatter, tags, tickers, counts,
+- [x] `vault_seed/CLAUDE.md` rewritten for Section A-D conventions
+- [x] workspace_migrator: dives/ rename + full 7-specialist mapping
+- [x] vault_migrator: seed CLAUDE.md / INDEX.md / LOG.md during apply
+- [x] Validator strengthened (frontmatter, tags, tickers, counts,
       dive-slug sanity)
 - [ ] `--clean` flag on apply
-- [ ] `cutover` CLI command
+- [x] `cutover` CLI command
 - [x] `import-copilot-filings` CLI command
 - [x] `import-copilot-events` CLI command
 - [ ] Unit tests (workspace slugs, validator frontmatter, copilot-filings
       translation)
 - [ ] Integration test (end-to-end migration fit against fixture vault)
-- [ ] `MIGRATION.md` rewritten per D61
+- [x] `MIGRATION.md` rewritten per D61
 - [x] Apply to `~/vault-staging` (merged directly into live vault via cutover)
 - [x] Historical filings imported (1476 filings + 3127 press releases from copilot S3)
 - [x] Events imported (12 daily events from copilot S3)
 - [ ] Human review of staging (Avyuk spot-checks company notes / dives /
       themes / memos)
-- [ ] Cutover `~/vault-staging` → `~/vault`
-- [ ] Smoke test green against live `~/vault`
+- [x] Cutover `~/vault-staging` → `~/vault`
+- [x] Smoke test green against live `~/vault`
 - [ ] Commit
 
 ---

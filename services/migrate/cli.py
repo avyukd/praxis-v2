@@ -154,16 +154,25 @@ def validate(target: str) -> None:
     total_links = 0
     broken_links: list[tuple[str, str]] = []
 
-    # Build a set of all existing stems in target
-    stems_by_relpath: set[str] = set()
-    stems_by_slug: dict[str, str] = {}
-    for p in tgt.rglob("*.md"):
+    # Index every file in the vault so wikilinks to .json artifacts (e.g.
+    # [[_analyzed/press_releases/.../analysis.json]]) resolve correctly.
+    # Previously this only considered .md files, which flagged every
+    # json citation as broken.
+    stems_by_relpath: set[str] = set()  # exact relative path, no extension for .md
+    full_paths: set[str] = set()  # exact relative path with extension
+    stems_by_slug: dict[str, str] = {}  # basename-without-ext → relpath-no-ext (for .md)
+    for p in tgt.rglob("*"):
+        if not p.is_file():
+            continue
         if any(part in {".cache", ".obsidian"} for part in p.parts):
             continue
-        rel = p.relative_to(tgt).as_posix()[:-3]  # strip .md
-        stems_by_relpath.add(rel)
-        stems_by_slug.setdefault(Path(rel).name, rel)
-        total_files += 1
+        rel_full = p.relative_to(tgt).as_posix()
+        full_paths.add(rel_full)
+        if p.suffix == ".md":
+            rel = rel_full[:-3]  # strip .md
+            stems_by_relpath.add(rel)
+            stems_by_slug.setdefault(p.stem, rel)
+            total_files += 1
 
     wikilink_re = re.compile(r"\[\[([^\[\]]+)\]\]")
     for p in tgt.rglob("*.md"):
@@ -171,7 +180,6 @@ def validate(target: str) -> None:
             continue
         if "_raw" in p.parts or "_analyzed" in p.parts:
             continue
-        # Skip the migration report itself — it contains example unresolved links as text
         if p.name == "_migration_report.md":
             continue
         try:
@@ -181,12 +189,15 @@ def validate(target: str) -> None:
         rel = p.relative_to(tgt).as_posix()
         for m in wikilink_re.finditer(text):
             raw = m.group(1).split("|", 1)[0].split("#", 1)[0].strip()
-            if raw.endswith(".md"):
-                raw = raw[:-3]
             total_links += 1
-            if raw in stems_by_relpath:
+            # Try exact-path match first (for json, yaml, etc. wikilinks)
+            if raw in full_paths:
                 continue
-            if Path(raw).name in stems_by_slug:
+            # .md match: allow with or without explicit .md suffix
+            target_no_md = raw[:-3] if raw.endswith(".md") else raw
+            if target_no_md in stems_by_relpath:
+                continue
+            if Path(target_no_md).name in stems_by_slug:
                 continue
             broken_links.append((rel, raw))
 
