@@ -134,7 +134,11 @@ async def execute_task(task: Task, worker_id: str) -> None:
             # CancelledError into the handler → CLIInvoker's finally kills subproc.
             handler_task = asyncio.create_task(handler(ctx))
             cancel_waiter = asyncio.create_task(cancel_event.wait())
-            wall_timeout = max(60, settings.cli_wall_clock_timeout_s + 120)
+            # Worker-level wall timeout sits ABOVE the CLI invoker's own
+            # timeout so the invoker's SIGTERM grace window (60s) + SIGKILL
+            # fallback can all run before the worker gives up on the task.
+            # CLI 3600s + 300s buffer = 3900s (65 min) at default config.
+            wall_timeout = max(60, settings.cli_wall_clock_timeout_s + 300)
 
             done, pending = await asyncio.wait(
                 {handler_task, cancel_waiter},

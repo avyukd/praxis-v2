@@ -23,8 +23,15 @@ class Settings(BaseSettings):
     worker_lease_s: int = 300
     worker_heartbeat_interval_s: int = 60
     worker_cancel_poll_interval_s: int = 5
-    cli_no_event_timeout_s: int = 60
-    cli_wall_clock_timeout_s: int = 600
+    # Claude CLI quiet-stream timeout. A dive doing WebFetch + multiple MCP
+    # tool calls can legitimately go 2-3 minutes between stdout events; a
+    # 60s cap was killing legitimate work. Bumped to 5 min.
+    cli_no_event_timeout_s: int = 300
+    # Wall clock for a single LLM invocation. Deep research dives can run
+    # 30+ min pulling SEC filings and building tables; we'd rather let them
+    # finish than kill and lose state. 1 hour is the hard ceiling; SIGTERM
+    # sent first so the CLI flushes output, then SIGKILL after grace window.
+    cli_wall_clock_timeout_s: int = 3600
 
     rate_limit_initial_backoff_s_min: int = 180
     rate_limit_initial_backoff_s_max: int = 300

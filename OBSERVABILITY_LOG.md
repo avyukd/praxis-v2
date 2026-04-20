@@ -16,3 +16,4 @@
 2026-04-20T14:48:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 236 success / 0 queued / 0 running / 50 dl — 30min: 27 analyze + 4 memo + 3 each compile/dive/notify — dl_recent=0 — rl clear
 2026-04-20T15:02:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 236 success / 0 queued / 0 running / 50 dl — last activity 11:34 PT (16min idle — real world lull, 1 new filing_8_k + 1 cnw rejection in last 15min) — rl clear
 2026-04-20T15:17:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 240 success / 0 queued / 0 running / 50 dl — rl clear
+2026-04-20T15:43:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 240 success / 3 queued / 1 running / 45 dl — dive-quality refactor live: BTO+OCS re-queue flowing (2 orchestrate_dive success, industry_structure success, capital_allocation running, business_moat+financial_rigorous+synthesize_memo queued) — rl clear

@@ -194,18 +194,45 @@ class CLIInvoker:
                 if event.is_result:
                     return "stop" if not parser.hit_error else "error"
 
+        async def _read_with_soft_warning() -> FinishReason:
+            """Wraps _read_stdout to emit a journal-visible warning 5 min
+            before the hard wall timeout fires, so long-running dives are
+            flagged (but not killed) for observability."""
+            soft_warn_after = max(60, timeout_s - 300)
+            reader = asyncio.create_task(_read_stdout())
+            try:
+                done, _ = await asyncio.wait({reader}, timeout=soft_warn_after)
+                if reader in done:
+                    return reader.result()
+                log.warning(
+                    "cli.invoke.long_running",
+                    elapsed_s=int(time.monotonic() - started_at),
+                    hard_timeout_s=timeout_s,
+                    grace_remaining_s=timeout_s - soft_warn_after,
+                )
+                return await reader
+            except Exception:
+                reader.cancel()
+                raise
+
         try:
             try:
-                finish = await asyncio.wait_for(_read_stdout(), timeout=timeout_s)
+                finish = await asyncio.wait_for(
+                    _read_with_soft_warning(), timeout=timeout_s
+                )
             except TimeoutError:
                 log.warning(
                     "cli.invoke.wall_timeout",
                     duration_s=time.monotonic() - started_at,
                     timeout_s=timeout_s,
+                    action="sending SIGTERM — CLI has grace window to flush "
+                    "output before SIGKILL",
                 )
                 finish = "timeout"
 
-            # Ensure process is reaped. If we're terminating early, kill the group.
+            # Ensure process is reaped. If we're terminating early, kill the
+            # group — _kill_proc_tree sends SIGTERM first with a 60s grace
+            # window so Claude CLI can flush partial output and exit clean.
             if proc.returncode is None:
                 await self._kill_proc_tree(proc)
 
@@ -251,7 +278,12 @@ class CLIInvoker:
 
     @staticmethod
     async def _kill_proc_tree(proc: asyncio.subprocess.Process) -> None:
-        """Kill the process group so child processes (MCP servers, tool subprocs) die too."""
+        """Kill the process group so child processes (MCP servers, tool
+        subprocs) die too. SIGTERM → 60s grace for Claude CLI to flush any
+        in-progress tool output and exit gracefully → SIGKILL if still
+        alive. The 60s grace window is deliberately long so a Write-tool
+        call that was mid-flight at SIGTERM time has a full minute to
+        complete and preserve the dive artifact on disk."""
         if proc.returncode is not None:
             return
         try:
@@ -260,11 +292,13 @@ class CLIInvoker:
                 os.killpg(pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
                 proc.terminate()
+            log.info("cli.invoke.sigterm_sent", pid=pid, grace_s=60)
             try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
+                await asyncio.wait_for(proc.wait(), timeout=60)
+                log.info("cli.invoke.sigterm_clean_exit", pid=pid)
                 return
             except TimeoutError:
-                pass
+                log.warning("cli.invoke.sigterm_no_exit", pid=pid, action="sigkill")
             try:
                 os.killpg(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
