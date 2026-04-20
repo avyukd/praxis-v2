@@ -316,8 +316,9 @@ async def cancel_investigation(
     cascade=False: just marks the investigation abandoned; running tasks
     keep going to completion.
     """
-    from praxis_core.time_et import now_utc
     from sqlalchemy import update
+
+    from praxis_core.time_et import now_utc
 
     async with session_scope() as session:
         inv = (

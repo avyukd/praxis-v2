@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-
 _VALID_FORM_TYPES = frozenset({"8-K", "10-Q", "10-K", "press_release"})
 
 

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy import select
 
 from handlers import HandlerContext, HandlerResult

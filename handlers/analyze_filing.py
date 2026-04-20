@@ -12,7 +12,6 @@ from pathlib import Path
 
 from handlers import HandlerContext, HandlerResult
 from handlers._common import run_llm
-from praxis_core.config import get_settings
 from praxis_core.db.session import session_scope
 from praxis_core.filters.market_cap import get_cached_mcap
 from praxis_core.logging import get_logger
@@ -162,7 +161,6 @@ def _analyzed_dir(vault_root: Path, payload: AnalyzeFilingPayload) -> Path:
 
 async def handle(ctx: HandlerContext) -> HandlerResult:
     payload = AnalyzeFilingPayload.model_validate(ctx.payload)
-    settings = get_settings()
 
     raw_path = ctx.vault_root / payload.raw_path
     raw_content = _read_raw_content(raw_path)

@@ -6,7 +6,6 @@ import shutil
 from pathlib import Path
 
 from praxis_core.time_et import now_et
-from praxis_core.vault.writer import atomic_write
 
 
 def stash_for_edit(path: Path, vault_root: Path, category: str = "compile") -> Path | None:

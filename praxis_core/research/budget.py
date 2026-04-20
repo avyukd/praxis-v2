@@ -19,7 +19,7 @@ class ResearchBudget:
     depth_label: str
 
     @staticmethod
-    def from_priority(priority: int) -> "ResearchBudget":
+    def from_priority(priority: int) -> ResearchBudget:
         p = max(0, min(10, priority))
         if p <= 2:
             return ResearchBudget(

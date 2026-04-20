@@ -97,7 +97,7 @@ async def test_age_bump_promotes_old_low_priority_task() -> None:
     async with sm() as s:
         old_p2 = await enqueue_task(
             s,
-            task_type=TaskType.DIVE_BUSINESS,
+            task_type=TaskType.DIVE_BUSINESS_MOAT,
             payload={"ticker": "NVDA", "investigation_handle": "inv-1"},
             priority=2,
             dedup_key="old-p2",

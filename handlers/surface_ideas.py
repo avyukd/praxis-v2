@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import uuid
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ from praxis_core.schemas.payloads import NotifyPayload, SurfaceIdeasPayload
 from praxis_core.schemas.surfacing import SurfacedIdea
 from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import enqueue_task
-from praxis_core.time_et import et_date_str, et_iso, now_et, now_utc
+from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault.section_append import append_to_section
 from praxis_core.vault.writer import atomic_write
 
@@ -55,9 +55,9 @@ def _active_themes(vault_root: Path, max_age_days: int = 30) -> list[dict[str, A
             mtime_utc = p.stat().st_mtime
         except OSError:
             continue
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        if datetime.fromtimestamp(mtime_utc, tz=timezone.utc) < cutoff:
+        if datetime.fromtimestamp(mtime_utc, tz=UTC) < cutoff:
             continue
         try:
             post = frontmatter.load(str(p))

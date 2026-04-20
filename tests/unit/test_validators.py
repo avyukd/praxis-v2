@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from praxis_core.tasks.validators import (
+    validate_analyze_filing,
     validate_compile_to_wiki,
     validate_generate_daily_journal,
     validate_refresh_index,
@@ -206,8 +207,6 @@ def test_generate_daily_journal(tmp_path: Path) -> None:
 
 
 # -- Section A analyze_filing validator tests (two-stage Haiku→Sonnet) --
-
-from praxis_core.tasks.validators import validate_analyze_filing
 
 
 ANALYZE_PAYLOAD_8K = {

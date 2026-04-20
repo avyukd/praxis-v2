@@ -14,7 +14,6 @@ Restart=always
 RestartSec=10
 StartLimitBurst=5
 StartLimitIntervalSec=120
-WatchdogSec=120
 StandardOutput=journal
 StandardError=journal
 KillSignal=SIGTERM
