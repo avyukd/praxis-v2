@@ -216,6 +216,38 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
     notes_path = vc.company_notes_path(ctx.vault_root, payload.ticker)
     thesis_path = vc.company_thesis_path(ctx.vault_root, payload.ticker)
 
+    # Dives-complete gate (parallel-dive architecture): the 6 specialist
+    # dives run concurrently with no resource_key, so without this gate
+    # synthesize_memo could grab a worker and read skeletons instead of
+    # completed dives. Check that each expected dive file is >1500 bytes
+    # (skeleton is ~265 bytes; real dives always >3KB). If any is still
+    # skeleton-sized, a sibling task is probably still running — return
+    # ok=False with "dives_incomplete" so the worker requeues it.
+    dives_dir = ctx.vault_root / "companies" / payload.ticker / "dives"
+    skeleton_specialties: list[str] = []
+    for slug in SPECIALTIES:
+        p = dives_dir / f"{slug}.md"
+        if not p.exists():
+            continue  # missing is fine — investigation may legitimately skip
+        try:
+            if p.stat().st_size < 1500:
+                skeleton_specialties.append(slug)
+        except OSError:
+            pass
+    if skeleton_specialties:
+        log.info(
+            "synthesize_memo.dives_incomplete",
+            ticker=payload.ticker,
+            skeleton=skeleton_specialties,
+        )
+        return HandlerResult(
+            ok=False,
+            message=(
+                f"dives still writing (skeleton-sized): {skeleton_specialties}; "
+                "worker will retry"
+            ),
+        )
+
     async def _gather(s) -> DiveCoverage:
         return await _gather_coverage(
             s, ctx.vault_root, payload.ticker, payload.investigation_handle
