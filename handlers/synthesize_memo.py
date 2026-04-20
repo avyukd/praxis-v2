@@ -136,7 +136,7 @@ Task: synthesize_memo
 You are the coordinator. The specialist dives ran INDEPENDENTLY from each
 other — they did not share context, so their conclusions are genuinely
 independent reads on the same company. Your job is to cross-check them
-and produce a decisive memo.
+and produce a decisive memo with a clear, tradable call.
 
 ## Cross-check first, synthesize second
 
@@ -152,27 +152,78 @@ Before writing the memo sections below, read every existing dive under
 
 The `## Dive cross-check` section in the memo must surface all three.
 
-## Memo structure (required)
+## Required frontmatter (copilot memo.yaml style, embedded in md)
 
-  frontmatter: type=memo, ticker, decision (Buy|Sell|Neutral|Too Hard),
-               data_vintage, links
+The memo frontmatter MUST include a structured decision + valuation
+block. This is what the system reads programmatically — be precise.
+
+```yaml
+---
+type: memo
+ticker: <TICKER>
+date: <YYYY-MM-DD>
+decision: Buy | Sell | Neutral | Too Hard
+current_price: <USD, from mcp__fundamentals__get_price>
+fair_value_estimate: <USD, your single-number target>
+upside_pct: <((fair_value - current) / current) * 100, rounded int>
+entry_range: [low, high]        # price range you'd add/initiate at
+exit_range: [low, high]         # price range you'd trim/close at
+scores:
+  tactical: 1-5                 # near-term setup quality
+  fundamental: 1-5              # long-term business quality
+data_vintage: <YYYY-MM-DD of most recent filing/data used>
+thesis_summary: "<1-2 sentence variant perception>"
+links: [<wikilinks to dives / investigations / themes>]
+---
+```
+
+## Memo body structure (required)
+
+  # <TICKER> Investment Memo — <decision>
+
+  ## Decision & target
+  - **Decision:** Buy / Sell / Neutral / Too Hard
+  - **Current price:** $X.XX (as of <date>)
+  - **Fair value estimate:** $Y.YY
+  - **Upside/downside:** ±N% vs current
+  - **Entry range:** [$low, $high]
+  - **Exit range:** [$low, $high]
+  - **Scores:** tactical N/5, fundamental N/5
+  - One sentence: why this decision now?
+
   ## Thesis                (1-2 sentence variant perception)
   ## What's new            (the catalyst that triggered this memo)
-  ## Dive cross-check      (NEW — explicit agreement/disagreement table
-                            across specialists; resolve disagreements
-                            via primary filings, don't punt)
+  ## Dive cross-check      (explicit agreement/disagreement/silence)
   ## Business overview
   ## Financial analysis    (tables with sourced numbers)
   ## Competitive position
-  ## Valuation             (explicit assumptions)
+  ## Valuation             (how you got to fair_value_estimate: DCF /
+                            comps / NAV / asset-value — show your work,
+                            list assumptions, show the math)
   ## Variant perception    (3-col table: Market sees | We see | Why we're right)
-  ## Risks                 (specific, kill-criteria-style)
+  ## Risks                 (kill-criteria-style — specific conditions
+                            under which this decision flips)
   ## Confidence & gaps
   ## Related               (wikilinks, bidirectional)
 
+## Valuation discipline — non-negotiable
+
+- **Pull the current price via mcp__fundamentals__get_price(TICKER)**
+  before writing the decision block. "Current price" cannot be a
+  guess or stale.
+- **Fair value must be a single number**, not a range, in the frontmatter.
+  Use the range fields (`entry_range` / `exit_range`) for banding.
+- **Show your valuation work** in the Valuation section — multiples,
+  DCF inputs, comp table, whatever. If you can't show the work, the
+  decision is Too Hard, not Neutral.
+- **Upside_pct** is a derived field — compute from current + fair_value.
+  If you can't set a fair value with conviction, write `null` and set
+  decision to "Too Hard."
+
 Decision hygiene: "Too Hard" and "Neutral" are valid. Don't force
 conviction. If the dives genuinely disagree after you've gone to primary
-sources, "Too Hard" is the honest answer.
+sources, "Too Hard" is the honest answer — but "Too Hard" still requires
+a target-price attempt + stated reason for the uncertainty.
 
 Memo path: <vault>/companies/<TICKER>/memos/<YYYY-MM-DD>-<memo_handle>.md
 """
