@@ -5,22 +5,47 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+_VALID_FORM_TYPES = frozenset({"8-K", "10-Q", "10-K", "press_release"})
+
+
+def _validate_form_type(v: str) -> str:
+    if v not in _VALID_FORM_TYPES:
+        raise ValueError(
+            f"form_type {v!r} not in {sorted(_VALID_FORM_TYPES)}"
+        )
+    return v
+
+
 class TriageFilingPayload(BaseModel):
     accession: str
-    form_type: Literal["8-K", "10-Q", "10-K"]
+    form_type: str
     ticker: str | None = None
     cik: str
     filing_url: str
     raw_path: str
 
+    @classmethod
+    def model_validate(cls, obj, **kwargs):  # type: ignore[override]
+        result = super().model_validate(obj, **kwargs)
+        _validate_form_type(result.form_type)
+        return result
+
 
 class AnalyzeFilingPayload(BaseModel):
     accession: str
-    form_type: Literal["8-K", "10-Q", "10-K"]
+    form_type: str
     ticker: str | None = None
-    cik: str
-    triage_result_path: str
+    cik: str | None = None
+    triage_result_path: str | None = None
     raw_path: str
+    source: str = "edgar"
+    release_id: str | None = None
+
+    @classmethod
+    def model_validate(cls, obj, **kwargs):  # type: ignore[override]
+        result = super().model_validate(obj, **kwargs)
+        _validate_form_type(result.form_type)
+        return result
 
 
 class CompileToWikiPayload(BaseModel):

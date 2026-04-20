@@ -4,7 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from praxis_core.schemas.artifacts import (
-    AnalysisSignals,
+    AnalysisResult,
+    ScreenResult,
     TriageResult,
     ValidationMalformed,
     ValidationResult,
@@ -38,31 +39,88 @@ def test_triage_result_score_bounds() -> None:
         )
 
 
-def test_analysis_signals_valid() -> None:
-    s = AnalysisSignals(
-        accession="x",
+def test_analysis_result_valid() -> None:
+    r = AnalysisResult(
+        accession="0001045810-26-000047",
         ticker="NVDA",
-        event_type="earnings_guidance_update",
-        trade_relevant=True,
-        urgency="intraday",
-        specific_claims=["raised FY guidance to X"],
-        linked_themes=["ai-capex-digestion"],
-        confidence=0.8,
-        summary="Guidance raise implies stronger H2.",
+        form_type="8-K",
+        source="edgar",
+        classification="positive",
+        magnitude=0.7,
+        new_information="Raised FY25 revenue guidance by $1B.",
+        materiality="Guidance raise equals ~5% of prior consensus.",
+        explanation="Positive surprise on guidance; datacenter segment strong.",
+        analyzed_at="2026-04-20T09:15:00-04:00",
+        model="sonnet",
     )
-    assert s.trade_relevant
+    assert r.classification == "positive"
+    assert 0.0 <= r.magnitude <= 1.0
+
+
+def test_analysis_result_magnitude_bounds() -> None:
+    with pytest.raises(ValidationError):
+        AnalysisResult(
+            accession="x",
+            ticker="NVDA",
+            form_type="8-K",
+            source="edgar",
+            classification="positive",
+            magnitude=1.5,
+            new_information="x",
+            materiality="x",
+            explanation="x",
+            analyzed_at="2026-04-20T09:15:00-04:00",
+            model="sonnet",
+        )
+
+
+def test_analysis_result_classification_enum() -> None:
+    with pytest.raises(ValidationError):
+        AnalysisResult(
+            accession="x",
+            ticker="NVDA",
+            form_type="8-K",
+            source="edgar",
+            classification="BUY",  # type: ignore[arg-type]
+            magnitude=0.5,
+            new_information="x",
+            materiality="x",
+            explanation="x",
+            analyzed_at="2026-04-20T09:15:00-04:00",
+            model="sonnet",
+        )
+
+
+def test_screen_result_valid() -> None:
+    s = ScreenResult(
+        accession="x",
+        outcome="neutral",
+        screened_at="2026-04-20T09:15:00-04:00",
+        raw_response="neutral",
+    )
+    assert s.outcome == "neutral"
+
+
+def test_screen_result_outcome_enum() -> None:
+    with pytest.raises(ValidationError):
+        ScreenResult(
+            accession="x",
+            outcome="maybe",  # type: ignore[arg-type]
+            screened_at="2026-04-20T09:15:00-04:00",
+            raw_response="maybe",
+        )
 
 
 def test_validation_result_success() -> None:
-    r = ValidationResult(ok=["triage.md", "triage.json"], missing=[], malformed=[])
+    r = ValidationResult(ok=["screen.json", "analysis.json"], missing=[], malformed=[])
     assert r.is_success
     assert not r.is_partial
 
 
 def test_validation_result_partial() -> None:
     r = ValidationResult(
-        ok=["triage.md"],
-        missing=["triage.json"],
+        ok=["screen.json"],
+        missing=["analysis.json"],
         malformed=[],
     )
     assert not r.is_success
@@ -71,8 +129,8 @@ def test_validation_result_partial() -> None:
 
 def test_validation_result_malformed_partial() -> None:
     r = ValidationResult(
-        ok=["analysis.md"],
-        malformed=[ValidationMalformed(path="signals.json", reason="invalid json")],
+        ok=["screen.json"],
+        malformed=[ValidationMalformed(path="analysis.json", reason="invalid json")],
     )
     assert r.is_partial
 

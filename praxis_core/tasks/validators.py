@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from praxis_core.schemas.artifacts import (
-    AnalysisSignals,
+    AnalysisResult,
+    ScreenResult,
     TriageResult,
     ValidationMalformed,
     ValidationResult,
@@ -72,22 +73,69 @@ def validate_triage_filing(payload_raw: dict[str, Any], vault_root: Path) -> Val
 
 
 def validate_analyze_filing(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    """Two-stage analyze validator (Section A D11).
+
+    Contract:
+      - screen.json must exist and parse as ScreenResult (always required)
+      - If screen.outcome == "negative": no analysis.json expected. Success.
+      - If screen.outcome in {positive, neutral}: analysis.json must exist
+        and parse as AnalysisResult. Otherwise partial / missing.
+    """
     payload = AnalyzeFilingPayload.model_validate(payload_raw)
-    d = vc.analyzed_filing_dir(vault_root, payload.form_type, payload.accession)
-    analysis_md = d / "analysis.md"
-    signals_json = d / "signals.json"
+
+    if payload.form_type == "press_release":
+        if not payload.ticker or not payload.release_id:
+            return ValidationResult(
+                malformed=[
+                    ValidationMalformed(
+                        path="<payload>",
+                        reason="press_release analysis requires ticker + release_id",
+                    )
+                ]
+            )
+        d = vc.analyzed_pr_dir(vault_root, payload.source, payload.ticker, payload.release_id)
+    else:
+        d = vc.analyzed_filing_dir(vault_root, payload.form_type, payload.accession)
+
+    screen_path = d / "screen.json"
+    analysis_path = d / "analysis.json"
+
     ok: list[str] = []
     missing: list[str] = []
     malformed: list[ValidationMalformed] = []
-    s, exists = _check_file_exists(analysis_md)
-    (ok if exists else missing).append(s)
-    s, err = _check_pydantic_file(signals_json, AnalysisSignals, json_file=True)
-    if err is None:
-        ok.append(s)
-    elif err == "missing":
-        missing.append(s)
+
+    s_screen, err_screen = _check_pydantic_file(screen_path, ScreenResult, json_file=True)
+    if err_screen is None:
+        ok.append(s_screen)
+    elif err_screen == "missing":
+        missing.append(s_screen)
+        return ValidationResult(ok=ok, missing=missing, malformed=malformed)
     else:
-        malformed.append(ValidationMalformed(path=s, reason=err))
+        malformed.append(ValidationMalformed(path=s_screen, reason=err_screen))
+        return ValidationResult(ok=ok, missing=missing, malformed=malformed)
+
+    # Read screen outcome to decide whether analysis.json is expected
+    try:
+        import json as _json
+
+        screen_data = _json.loads(screen_path.read_text(encoding="utf-8"))
+        outcome = screen_data.get("outcome")
+    except Exception as e:
+        malformed.append(ValidationMalformed(path=s_screen, reason=f"read_fail: {e}"))
+        return ValidationResult(ok=ok, missing=missing, malformed=malformed)
+
+    if outcome == "negative":
+        return ValidationResult(ok=ok, missing=missing, malformed=malformed)
+
+    # positive or neutral — analysis.json required
+    s_analysis, err_analysis = _check_pydantic_file(analysis_path, AnalysisResult, json_file=True)
+    if err_analysis is None:
+        ok.append(s_analysis)
+    elif err_analysis == "missing":
+        missing.append(s_analysis)
+    else:
+        malformed.append(ValidationMalformed(path=s_analysis, reason=err_analysis))
+
     return ValidationResult(ok=ok, missing=missing, malformed=malformed)
 
 

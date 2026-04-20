@@ -24,24 +24,33 @@ class TriageResult(BaseModel):
     warrants_deep_read: bool
 
 
-class AnalysisThesisImpact(BaseModel):
-    handle: str
-    direction: Literal["supportive", "refutes", "neutral"]
-    confidence: float = Field(ge=0.0, le=1.0)
+class ScreenResult(BaseModel):
+    """Haiku pre-screen output. Persisted at <analyzed_dir>/screen.json."""
+
+    accession: str
+    outcome: Literal["positive", "negative", "neutral"]
+    screened_at: str
+    raw_response: str
 
 
-class AnalysisSignals(BaseModel):
+class AnalysisResult(BaseModel):
+    """Sonnet analysis output. Persisted at <analyzed_dir>/analysis.json.
+
+    Replaces the older AnalysisSignals schema. Flat fields, stock-reaction
+    framing (positive/negative/neutral — not investment BUY/SELL).
+    """
+
     accession: str
     ticker: str | None = None
-    event_type: str
-    trade_relevant: bool
-    urgency: Literal["low", "medium", "high", "intraday"]
-    specific_claims: list[str] = Field(default_factory=list)
-    linked_themes: list[str] = Field(default_factory=list)
-    linked_concepts: list[str] = Field(default_factory=list)
-    thesis_impacts: list[AnalysisThesisImpact] = Field(default_factory=list)
-    confidence: float = Field(ge=0.0, le=1.0)
-    summary: str
+    form_type: str
+    source: str
+    classification: Literal["positive", "negative", "neutral"]
+    magnitude: float = Field(ge=0.0, le=1.0)
+    new_information: str
+    materiality: str
+    explanation: str
+    analyzed_at: str
+    model: str
 
 
 class LintFinding(BaseModel):

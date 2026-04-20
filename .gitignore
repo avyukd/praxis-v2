@@ -27,3 +27,4 @@ node_modules/
 /tmp-claude-*/
 .coverage
 htmlcov/
+.claude/scheduled_tasks.lock

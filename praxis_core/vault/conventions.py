@@ -92,3 +92,11 @@ def analyzed_filing_dir(vault: Path, form_type: str, accession: str) -> Path:
 
 def raw_manual_path(vault: Path, dt: datetime, slug: str) -> Path:
     return Path(vault) / "_raw" / "manual" / _date_str(dt) / f"{slug}.md"
+
+
+def raw_pr_dir(vault: Path, source: str, ticker: str, release_id: str) -> Path:
+    return Path(vault) / "_raw" / "press_releases" / source / ticker / release_id
+
+
+def analyzed_pr_dir(vault: Path, source: str, ticker: str, release_id: str) -> Path:
+    return Path(vault) / "_analyzed" / "press_releases" / source / ticker / release_id

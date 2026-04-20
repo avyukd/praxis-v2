@@ -1,6 +1,7 @@
 from praxis_core.schemas.artifacts import (
-    AnalysisSignals,
+    AnalysisResult,
     LintReport,
+    ScreenResult,
     TriageResult,
     ValidationResult,
 )
@@ -27,7 +28,7 @@ from praxis_core.schemas.task_types import (
 )
 
 __all__ = [
-    "AnalysisSignals",
+    "AnalysisResult",
     "AnalyzeFilingPayload",
     "CompileToWikiPayload",
     "DiveBusinessPayload",
@@ -40,6 +41,7 @@ __all__ = [
     "NotifyPayload",
     "OrchestrateDivePayload",
     "RefreshIndexPayload",
+    "ScreenResult",
     "SynthesizeMemoPayload",
     "TASK_RESOURCE_KEYS",
     "TaskModel",

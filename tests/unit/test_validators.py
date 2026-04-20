@@ -203,3 +203,116 @@ def test_generate_daily_journal(tmp_path: Path) -> None:
     _write(tmp_path / "journal" / "2026-04-18.md", "x")
     r = validate_generate_daily_journal(payload, tmp_path)
     assert r.is_success
+
+
+# -- Section A analyze_filing validator tests (two-stage Haiku→Sonnet) --
+
+from praxis_core.tasks.validators import validate_analyze_filing
+
+
+ANALYZE_PAYLOAD_8K = {
+    "accession": "0001045810-26-000047",
+    "form_type": "8-K",
+    "ticker": "NVDA",
+    "cik": "0001045810",
+    "raw_path": "_raw/filings/8-k/0001045810-26-000047/filing.txt",
+    "source": "edgar",
+}
+
+
+ANALYZE_PAYLOAD_PR = {
+    "accession": "gnw-1234",
+    "form_type": "press_release",
+    "ticker": "NVDA",
+    "raw_path": "_raw/press_releases/gnw/NVDA/gnw-1234/release.txt",
+    "source": "gnw",
+    "release_id": "gnw-1234",
+}
+
+
+def _write_screen(d: Path, outcome: str) -> None:
+    _write(
+        d / "screen.json",
+        json.dumps(
+            {
+                "accession": "x",
+                "outcome": outcome,
+                "screened_at": "2026-04-20T09:15:00-04:00",
+                "raw_response": outcome,
+            }
+        ),
+    )
+
+
+def _write_analysis(d: Path) -> None:
+    _write(
+        d / "analysis.json",
+        json.dumps(
+            {
+                "accession": "x",
+                "ticker": "NVDA",
+                "form_type": "8-K",
+                "source": "edgar",
+                "classification": "positive",
+                "magnitude": 0.7,
+                "new_information": "x",
+                "materiality": "x",
+                "explanation": "x",
+                "analyzed_at": "2026-04-20T09:15:00-04:00",
+                "model": "sonnet",
+            }
+        ),
+    )
+
+
+def test_analyze_missing_screen(tmp_path: Path) -> None:
+    r = validate_analyze_filing(ANALYZE_PAYLOAD_8K, tmp_path)
+    assert not r.is_success
+    assert any("screen.json" in m for m in r.missing)
+
+
+def test_analyze_negative_screen_is_success(tmp_path: Path) -> None:
+    d = vc.analyzed_filing_dir(tmp_path, "8-K", ANALYZE_PAYLOAD_8K["accession"])
+    _write_screen(d, "negative")
+    r = validate_analyze_filing(ANALYZE_PAYLOAD_8K, tmp_path)
+    assert r.is_success, f"negative screen should be a success, got {r}"
+
+
+def test_analyze_positive_screen_needs_analysis(tmp_path: Path) -> None:
+    d = vc.analyzed_filing_dir(tmp_path, "8-K", ANALYZE_PAYLOAD_8K["accession"])
+    _write_screen(d, "positive")
+    r = validate_analyze_filing(ANALYZE_PAYLOAD_8K, tmp_path)
+    assert not r.is_success
+    assert any("analysis.json" in m for m in r.missing)
+
+
+def test_analyze_positive_with_analysis_is_success(tmp_path: Path) -> None:
+    d = vc.analyzed_filing_dir(tmp_path, "8-K", ANALYZE_PAYLOAD_8K["accession"])
+    _write_screen(d, "positive")
+    _write_analysis(d)
+    r = validate_analyze_filing(ANALYZE_PAYLOAD_8K, tmp_path)
+    assert r.is_success
+
+
+def test_analyze_malformed_analysis_is_partial(tmp_path: Path) -> None:
+    d = vc.analyzed_filing_dir(tmp_path, "8-K", ANALYZE_PAYLOAD_8K["accession"])
+    _write_screen(d, "positive")
+    _write(d / "analysis.json", "{not json")
+    r = validate_analyze_filing(ANALYZE_PAYLOAD_8K, tmp_path)
+    assert r.is_partial
+    assert any("analysis.json" in m.path for m in r.malformed)
+
+
+def test_analyze_pr_variant_uses_pr_dir(tmp_path: Path) -> None:
+    d = vc.analyzed_pr_dir(tmp_path, "gnw", "NVDA", "gnw-1234")
+    _write_screen(d, "positive")
+    _write_analysis(d)
+    r = validate_analyze_filing(ANALYZE_PAYLOAD_PR, tmp_path)
+    assert r.is_success
+
+
+def test_analyze_pr_missing_ticker_malformed(tmp_path: Path) -> None:
+    payload = dict(ANALYZE_PAYLOAD_PR)
+    payload["ticker"] = None
+    r = validate_analyze_filing(payload, tmp_path)
+    assert r.malformed

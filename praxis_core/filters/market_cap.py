@@ -122,6 +122,22 @@ async def fetch_market_cap_usd(
     )
 
 
+async def get_cached_mcap(session: AsyncSession, ticker: str) -> int | None:
+    """Cache-only lookup. Returns None if not cached. No yfinance call.
+
+    Used by handlers that want whatever mcap the pollers already warmed
+    without triggering new yfinance traffic per filing.
+    """
+    ticker = ticker.strip().upper()
+    row = (
+        await session.execute(
+            text("SELECT market_cap_usd FROM market_cap_cache WHERE ticker = :t"),
+            {"t": ticker},
+        )
+    ).first()
+    return row.market_cap_usd if row is not None else None
+
+
 def passes_mcap_filter(
     mcap: int | None,
     max_usd: int,
