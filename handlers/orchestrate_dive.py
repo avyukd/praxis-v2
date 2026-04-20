@@ -11,6 +11,7 @@ from praxis_core.logging import get_logger
 from praxis_core.schemas.payloads import OrchestrateDivePayload
 from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import enqueue_task
+from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import et_date_str, et_iso
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import write_markdown_with_frontmatter
@@ -199,6 +200,7 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
                 dedup_key=f"{task_type.value}:{payload.investigation_handle}",
                 investigation_id=inv.id,
             )
+        await touch_investigation(s, inv.id)
 
     if ctx.session is not None:
         await _enqueue_sequence(ctx.session)

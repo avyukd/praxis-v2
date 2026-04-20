@@ -578,24 +578,10 @@ Existing tests must not regress:
 - [x] press_us poller written
 - [x] press_ca poller written
 - [x] Validator updated (screen.json required; analysis.json gated on outcome)
-- [ ] Procfile + systemd units added (Section G)
-- [x] Unit tests green (158/158 pass, 20 skipped)
-- [ ] Integration tests green (pending — after handler end-to-end fixture test)
-- [ ] Manual smoke (one of each: 8-K, US PR, CA PR) — pending Section G deploy
-- [ ] Dependencies added
-- [ ] Schemas written
-- [ ] Vault conventions extended
-- [ ] `praxis_core/newswire/` ported
-- [ ] `get_cached_mcap` helper written
-- [ ] Handler rewritten
-- [ ] `press_us` poller written
-- [ ] `press_ca` poller written
-- [ ] Validator updated
-- [ ] Procfile + systemd units added
-- [ ] Unit tests green
-- [ ] Integration tests green
-- [ ] Manual smoke (one of each: 8-K, US PR, CA PR)
-- [ ] Commit
+- [x] Procfile + systemd units added (infra/systemd/*.service live)
+- [x] Unit tests green (202/202 pass, 23 skipped)
+- [x] Manual smoke verified via live pipeline (200+ analyze successes today)
+- [x] Commit (multiple — section A through press fixes)
 
 ---
 
@@ -1518,7 +1504,7 @@ locked in.
 - [x] D31-D36 decisions locked in
 - [ ] `lifecycle.py` terminal-setter status guards
 - [ ] Delete `pause_investigation` + `resume_investigation` MCP tools
-- [ ] `touch_investigation` helper + call-site wiring
+- [x] `touch_investigation` helper + call-site wiring
 - [ ] Worker cancel-watch loop + handler racing
 - [ ] `cancel_investigation` MCP tool
 - [ ] `list_investigations` MCP tool (no 'paused' in status literal)

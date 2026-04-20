@@ -13,6 +13,7 @@ from praxis_core.logging import get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.schemas.payloads import SynthesizeMemoPayload
 from praxis_core.schemas.task_types import TaskModel
+from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import now_utc
 from praxis_core.vault import conventions as vc
 from services.dispatcher.investability import parse_investability
@@ -252,6 +253,7 @@ If the notes are thin, the memo should be short and decisively Neutral or Too Ha
             if rel not in existing:
                 existing.append(rel)
             inv.artifacts = existing
+            await touch_investigation(s, inv.id)
 
     if payload.investigation_handle:
         if ctx.session is not None:
