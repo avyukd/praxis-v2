@@ -289,5 +289,64 @@ def import_state_cmd(copilot_data: str, apply: bool) -> None:
     asyncio.run(_run())
 
 
+@cli.command("import-copilot-filings")
+@click.option("--vault", required=True, type=click.Path(), help="Target vault root")
+@click.option("--concurrency", type=int, default=16)
+@click.option("--limit-filings", type=int, default=None, help="Cap number of filings (test runs)")
+@click.option("--limit-press", type=int, default=None, help="Cap number of press releases")
+@click.option("--skip-filings/--no-skip-filings", default=False)
+@click.option("--skip-press/--no-skip-press", default=False)
+def import_copilot_filings_cmd(
+    vault: str,
+    concurrency: int,
+    limit_filings: int | None,
+    limit_press: int | None,
+    skip_filings: bool,
+    skip_press: bool,
+) -> None:
+    """D58 — backfill praxis-copilot S3 analyses into the vault.
+
+    Pulls analysis.json + index.json for every filing + press-release ever
+    analyzed by copilot, translates into our AnalysisResult schema, writes
+    _analyzed/ + _raw/ artifacts, and populates sources rows so the live
+    pollers won't re-ingest.
+    """
+    from services.migrate.copilot_filings import run_backfill
+
+    vault_root = Path(vault).expanduser()
+    if not vault_root.exists():
+        raise click.ClickException(f"vault root does not exist: {vault_root}")
+
+    async def _run() -> None:
+        report = await run_backfill(
+            vault_root,
+            concurrency=concurrency,
+            limit_filings=limit_filings,
+            limit_press=limit_press,
+            skip_filings=skip_filings,
+            skip_press=skip_press,
+        )
+        click.echo(report.render())
+
+    asyncio.run(_run())
+
+
+@cli.command("import-copilot-events")
+@click.option("--concurrency", type=int, default=32)
+@click.option("--limit", type=int, default=None, help="Cap number of events (test runs)")
+def import_copilot_events_cmd(concurrency: int, limit: int | None) -> None:
+    """D59 — backfill praxis-copilot S3 daily events into the events table
+    with event_type='filing_ingested_historical' / 'release_ingested_historical'
+    and payload.event_id for dedup.
+    """
+    from services.migrate.copilot_events import run_events_backfill
+
+    async def _run() -> None:
+        report = await run_events_backfill(concurrency=concurrency, limit=limit)
+        click.echo(report.render())
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     cli()
