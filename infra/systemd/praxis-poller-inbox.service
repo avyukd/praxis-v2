@@ -4,11 +4,11 @@ After=network.target postgresql.service
 
 [Service]
 Type=simple
-User=praxis
-Group=praxis
-WorkingDirectory=/opt/praxis-v2
-EnvironmentFile=/etc/praxis/praxis.env
-ExecStart=/opt/praxis-v2/.venv/bin/python -m services.pollers.inbox_watcher
+User=avyuk
+Group=avyuk
+WorkingDirectory=/home/avyuk/dev/praxis-v2
+EnvironmentFile=/home/avyuk/dev/praxis-v2/.env
+ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.pollers.inbox_watcher
 Restart=always
 RestartSec=10
 StandardOutput=journal

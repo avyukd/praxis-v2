@@ -53,6 +53,23 @@ MODEL_BUDGETS_USD: dict[TaskModel, float] = {
 }
 
 
+def _locate_claude_cli() -> str:
+    """Resolve the claude CLI binary path. Systemd services have minimal PATH
+    that often excludes ~/.local/bin where Claude Code installs."""
+    found = shutil.which("claude")
+    if found:
+        return found
+    candidates = [
+        Path.home() / ".local" / "bin" / "claude",
+        Path("/usr/local/bin/claude"),
+        Path("/opt/claude/claude"),
+    ]
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return str(c)
+    return "claude"  # fall through; will fail loudly at subprocess launch
+
+
 class LLMInvoker(Protocol):
     invoker_kind: Literal["cli", "api"]
 
@@ -105,7 +122,7 @@ class CLIInvoker:
         env.pop("CLAUDE_API_KEY", None)
 
         cmd = [
-            "claude",
+            _locate_claude_cli(),
             "-p",
             user_prompt,
             "--output-format=stream-json",

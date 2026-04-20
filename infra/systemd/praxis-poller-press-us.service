@@ -1,7 +1,6 @@
 [Unit]
-Description=praxis-v2 dispatcher
+Description=praxis-v2 US press-release poller (GNW NYSE + NASDAQ)
 After=network.target postgresql.service
-Wants=postgresql.service
 
 [Service]
 Type=simple
@@ -9,16 +8,13 @@ User=avyuk
 Group=avyuk
 WorkingDirectory=/home/avyuk/dev/praxis-v2
 EnvironmentFile=/home/avyuk/dev/praxis-v2/.env
-ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.dispatcher.main
+ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.pollers.press_us
 Restart=always
 RestartSec=10
 StartLimitBurst=5
 StartLimitIntervalSec=120
-WatchdogSec=120
 StandardOutput=journal
 StandardError=journal
-KillSignal=SIGTERM
-TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target

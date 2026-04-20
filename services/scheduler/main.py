@@ -78,11 +78,25 @@ async def _enqueue_cleanup_sessions(session: AsyncSession) -> None:
     )
 
 
+async def _enqueue_surface_ideas(session: AsyncSession) -> None:
+    """Section D D45 — 24/7 surface every 30min."""
+    await enqueue_task(
+        session,
+        task_type=TaskType.SURFACE_IDEAS,
+        payload={"triggered_by": "scheduler"},
+        priority=3,
+        dedup_key=f"surface_ideas:{now_et().strftime('%Y%m%d%H%M')[:11]}",
+    )
+
+
 JOBS: list[CadenceJob] = [
-    CadenceJob(name="refresh_index", interval_s=3600, action=_enqueue_refresh_index),
+    # Section D D39 — bumped from hourly to every 15min during market hours
+    CadenceJob(name="refresh_index", interval_s=900, action=_enqueue_refresh_index),
     CadenceJob(name="lint_vault", interval_s=86400, action=_enqueue_lint_vault),
     CadenceJob(name="daily_journal", interval_s=86400, action=_enqueue_daily_journal),
     CadenceJob(name="cleanup_sessions", interval_s=86400, action=_enqueue_cleanup_sessions),
+    # Section D D45 — 24/7, every 30min (off-hours ideation is the point)
+    CadenceJob(name="surface_ideas", interval_s=1800, action=_enqueue_surface_ideas),
 ]
 
 
