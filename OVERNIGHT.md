@@ -1165,7 +1165,7 @@ behavior unless explicitly flagged otherwise."
 - [ ] Plan parser extension (dive_custom multi-line)
 - [x] Worker INVESTABILITY detection + sibling cancel
 - [x] `override_investability` MCP tool
-- [ ] synthesize_memo quality gates
+- [x] synthesize_memo quality gates
 - [ ] Tests green (specialist validators, plan parser, coverage, worker
       logic, override, synthesize gates)
 - [ ] Integration smoke (full auto-dive end-to-end)
