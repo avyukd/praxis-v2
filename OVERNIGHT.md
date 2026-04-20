@@ -1132,23 +1132,23 @@ behavior unless explicitly flagged otherwise."
 ### Status (Section B)
 
 - [x] D19-D30 decisions locked in (2026-04-19 late eve review)
-- [ ] Dead code removal (`depends_on`)
-- [ ] New task types + payloads + validators
-- [ ] Alembic migrations
-- [ ] `ResearchBudget` ported
+- [x] Dead code removal (`depends_on`)
+- [x] New task types + payloads + validators
+- [x] Alembic migrations
+- [x] `ResearchBudget` ported
 - [x] `find_existing_coverage` helper
 - [x] Fundamentals MCP server + tools
 - [x] Fundamentals MCP cache
 - [x] Fundamentals MCP tests (unit + integration-live-gated)
-- [ ] `handlers/prompts/` directory scaffolded
-- [ ] All existing prompts moved to prompts/
-- [ ] Six specialist prompts ported from copilot
-- [ ] `dive_custom` prompt template
-- [ ] Global rules + second-order-thinking port
-- [ ] Six new specialist handlers
-- [ ] `dive_custom` handler
+- [x] `handlers/prompts/` directory scaffolded
+- [x] All existing prompts moved to prompts/
+- [x] Six specialist prompts ported from copilot
+- [x] `dive_custom` prompt template
+- [x] Global rules + second-order-thinking port
+- [x] Six new specialist handlers
+- [x] `dive_custom` handler
 - [ ] Orchestrator rewrite (wiki crawl + coverage + expanded plan)
-- [ ] Plan parser extension (dive_custom multi-line)
+- [x] Plan parser extension (dive_custom multi-line)
 - [x] Worker INVESTABILITY detection + sibling cancel
 - [x] `override_investability` MCP tool
 - [x] synthesize_memo quality gates
@@ -1502,13 +1502,13 @@ locked in.
 ### Status (Section C)
 
 - [x] D31-D36 decisions locked in
-- [ ] `lifecycle.py` terminal-setter status guards
-- [ ] Delete `pause_investigation` + `resume_investigation` MCP tools
+- [x] `lifecycle.py` terminal-setter status guards
+- [x] Delete `pause_investigation` + `resume_investigation` MCP tools
 - [x] `touch_investigation` helper + call-site wiring
-- [ ] Worker cancel-watch loop + handler racing
-- [ ] `cancel_investigation` MCP tool
-- [ ] `list_investigations` MCP tool (no 'paused' in status literal)
-- [ ] Config: `worker_cancel_poll_interval_s`
+- [x] Worker cancel-watch loop + handler racing
+- [x] `cancel_investigation` MCP tool
+- [x] `list_investigations` MCP tool (no 'paused' in status literal)
+- [x] Config: `worker_cancel_poll_interval_s`
 - [ ] Unit tests (mark_* races, cancel_investigation, list_investigations,
       pause-tools-removed sanity)
 - [ ] Integration test (cancel-running-task)
@@ -2078,17 +2078,17 @@ just use it in surface_ideas.
 
 - [x] D37-D52 decisions locked in (D40 removed, D52 added via OD-resolve)
 - [x] Open items OD1-OD5 resolved
-- [ ] SurfacedIdea schemas + Alembic migration
-- [ ] stash_for_edit backup helper + vault conventions
-- [ ] append_to_section helper (for cross-refs)
-- [ ] compile_to_wiki hardening (backup, drop INDEX write, shrink-guard,
+- [x] SurfacedIdea schemas + Alembic migration
+- [x] stash_for_edit backup helper + vault conventions
+- [x] append_to_section helper (for cross-refs)
+- [x] compile_to_wiki hardening (backup, drop INDEX write, shrink-guard,
       citation regex tightening)
-- [ ] compile_to_wiki trigger wiring in analyze_filing
-- [ ] surface_ideas handler + prompt + validator + anomaly cap
-- [ ] surfaced_ideas dedup logic
-- [ ] Cross-reference logic: append to themes/concepts referenced by ideas
+- [x] compile_to_wiki trigger wiring in analyze_filing
+- [x] surface_ideas handler + prompt + validator + anomaly cap
+- [x] surfaced_ideas dedup logic
+- [x] Cross-reference logic: append to themes/concepts referenced by ideas
 - [ ] MCP tools (list_surfaced_ideas, surface_ideas_now)
-- [ ] Scheduler: surface 24/7 cadence, refresh_index bump, LOG rotation,
+- [x] Scheduler: surface 24/7 cadence, refresh_index bump, LOG rotation,
       morning digest
 - [ ] Unit tests (dedup, backup, section_append, validator changes)
 - [ ] Integration tests (compile shrink-guard, surface end-to-end,

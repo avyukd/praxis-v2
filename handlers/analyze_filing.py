@@ -218,11 +218,20 @@ Content (first {SCREEN_TRUNCATE_CHARS} chars):
         outcome=outcome,
     )
 
-    # Negative screen → done; no Sonnet call.
-    if outcome == "negative":
-        return HandlerResult(ok=True, llm_result=screen_result, message=f"screen:{outcome}")
-
-    # Positive or neutral → full Sonnet analysis.
+    # Every screen outcome runs through Sonnet. Earlier design short-
+    # circuited on 'negative' to save the ~$1.50 Sonnet call since
+    # negatives aren't trade_relevant (we don't dispatch compile/notify/
+    # dive on them). But that left no analysis.json for bear-case
+    # filings, which:
+    #   - blinds surface_ideas to negative momentum / short signal
+    #     patterns (auditor changes, going-concern, delisting, failed
+    #     trials)
+    #   - makes the data distribution look "neutral for everything" when
+    #     observers read analysis.json files
+    #   - costs us the memo trail on short-candidate companies
+    # Additional cost ~$5-10/day at 25-30 negatives; trade_relevant gate
+    # downstream still filters what gets fan-out, so nothing else
+    # changes operationally.
     truncate_limit = (
         PR_TRUNCATE_CHARS if payload.form_type == "press_release" else FILING_TRUNCATE_CHARS
     )
