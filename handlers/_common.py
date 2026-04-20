@@ -6,6 +6,26 @@ from praxis_core.llm.invoker import LLMResult, get_invoker
 from praxis_core.schemas.task_types import TaskModel
 from praxis_core.vault import conventions as vc
 
+BASE_ALLOWED_TOOLS = [
+    "Read",
+    "Write",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Bash(mkdir:*)",
+]
+
+DIVE_ALLOWED_TOOLS = BASE_ALLOWED_TOOLS + [
+    "mcp__fundamentals__company_overview",
+    "mcp__fundamentals__list_financial_metrics",
+    "mcp__fundamentals__get_financial_data",
+    "mcp__fundamentals__get_full_statement",
+    "mcp__fundamentals__get_earnings",
+    "mcp__fundamentals__get_holders",
+    "mcp__fundamentals__get_price",
+    "mcp__fundamentals__search_fundamentals",
+]
+
 
 async def run_llm(
     *,
@@ -24,15 +44,7 @@ async def run_llm(
         model=model,
         max_budget_usd=max_budget_usd,
         mcp_config_path=str(mcp_cfg) if mcp_cfg else None,
-        allowed_tools=allowed_tools
-        or [
-            "Read",
-            "Write",
-            "Edit",
-            "Glob",
-            "Grep",
-            "Bash(mkdir:*)",
-        ],
+        allowed_tools=allowed_tools or BASE_ALLOWED_TOOLS,
     )
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from handlers import HandlerContext, HandlerResult
-from handlers._common import read_vault_schema, run_llm
+from handlers._common import DIVE_ALLOWED_TOOLS, read_vault_schema, run_llm
 from praxis_core.logging import get_logger
 from praxis_core.schemas.task_types import TaskModel
 from praxis_core.tasks.investigations import touch_investigation
@@ -86,6 +86,7 @@ Process:
         model=model,
         max_budget_usd=max_budget_usd,
         vault_root=ctx.vault_root,
+        allowed_tools=DIVE_ALLOWED_TOOLS,
     )
 
     if investigation_id and ctx.session is not None:

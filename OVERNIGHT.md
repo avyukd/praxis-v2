@@ -1151,9 +1151,9 @@ behavior unless explicitly flagged otherwise."
 - [ ] Alembic migrations
 - [ ] `ResearchBudget` ported
 - [ ] `find_existing_coverage` helper
-- [ ] Fundamentals MCP server + tools
-- [ ] Fundamentals MCP cache
-- [ ] Fundamentals MCP tests (unit + integration-live-gated)
+- [x] Fundamentals MCP server + tools
+- [x] Fundamentals MCP cache
+- [x] Fundamentals MCP tests (unit + integration-live-gated)
 - [ ] `handlers/prompts/` directory scaffolded
 - [ ] All existing prompts moved to prompts/
 - [ ] Six specialist prompts ported from copilot
