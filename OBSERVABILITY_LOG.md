@@ -10,3 +10,5 @@
 2026-04-20T13:03:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 156 success / 0 queued / 0 running / 50 dl (dl_recent=2 still my incident DLs, aging out soon) — no watchdog kills in last 15min — rl clear
 2026-04-20T13:20:00-04:00 — tier-0 — no red signals (dl_recent now 0, incident DLs aged out) — services-up: 6/6 — tasks: 157 success / 0 queued / 0 running / 50 dl — rl clear — no watchdog kills
 2026-04-20T13:36:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 158 success / 0 queued / 0 running / 50 dl — dl_recent=0 — rl clear
+2026-04-20T13:53:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 160 success / 0 running / 50 dl — rl clear — edgar re-triage bug fixed: last filing_rejected 10:46:55, zero post-restart (was 9/min pre-fix)
+2026-04-20T14:10:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 161 success / 0 running / 50 dl — filing_rejected since fix: 0 — rl clear — (separate known issue: poller missing ~43 8-Ks today due to 40-entry feed-window rollover + Fri-after-hours — awaiting user decision on fix approach)

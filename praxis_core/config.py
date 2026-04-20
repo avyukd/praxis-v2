@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     sec_user_agent: str = "praxis-v2 research-admin@praxis.local"
     edgar_poll_interval_s: int = 60
     edgar_form_types: str = "8-K"
+    edgar_search_days_back: int = 2
     edgar_item_allowlist: str = (
         "1.01,2.01,2.02,2.03,2.04,2.05,2.06,3.02,4.01,4.02,5.01,5.02,5.06,7.01,8.01"
     )

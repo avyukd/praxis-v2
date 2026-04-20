@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-import feedparser
 import httpx
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -18,10 +17,7 @@ from praxis_core.config import get_settings
 from praxis_core.db.models import Source
 from praxis_core.db.session import session_scope
 from praxis_core.filters.cik_ticker import load_cik_ticker_map
-from praxis_core.filters.edgar_items import (
-    extract_items_from_summary,
-    items_pass_allowlist,
-)
+from praxis_core.filters.edgar_items import items_pass_allowlist
 from praxis_core.filters.market_cap import fetch_market_cap_usd, passes_mcap_filter
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
@@ -35,11 +31,12 @@ from praxis_core.vault.writer import atomic_write
 log = get_logger("pollers.edgar_8k")
 
 
-EDGAR_FEED_URL_TEMPLATE = (
-    "https://www.sec.gov/cgi-bin/browse-edgar"
-    "?action=getcurrent&type={form}&company=&dateb=&owner=include&count={count}&output=atom"
+EDGAR_SEARCH_URL = (
+    "https://efts.sec.gov/LATEST/search-index"
+    "?q=&dateRange=custom&startdt={startdt}&enddt={enddt}&forms={form}"
 )
-ACCESSION_RE = re.compile(r"accession-number=(\S+)|Accession Number:\s*(\S+)")
+# Extract ticker from display_names, e.g. "AMD Inc. (AMD)  (CIK 0000002488)"
+TICKER_RE = re.compile(r"\(([A-Z][A-Z0-9.\-]{0,9}(?:,\s*[A-Z][A-Z0-9.\-]{0,9})*)\)\s*\(CIK")
 
 
 @dataclass
@@ -87,122 +84,77 @@ async def _http_get(url: str, user_agent: str) -> str:
         return response.text
 
 
-def _parse_accession_from_link(link: str, title: str = "") -> str | None:
-    """Extract accession number in format 0000000000-00-000000.
+def _parse_ticker_from_display(display: str) -> str | None:
+    m = TICKER_RE.search(display)
+    if not m:
+        return None
+    # If multiple (e.g. "AITX, AITXD") take the first
+    return m.group(1).split(",")[0].strip()
 
-    Real EDGAR atom feeds use: /Archives/edgar/data/<cik>/<acc-no-dashes>/<acc-dashed>-index.htm
-    Older form: ?accession-number=<acc>
-    Fallback: scan title for accession pattern.
+
+def _build_filing_from_hit(hit: dict[str, Any]) -> EdgarFiling | None:
+    src = hit.get("_source", {})
+    adsh = src.get("adsh")
+    form = src.get("form") or ""
+    if not adsh or not form.startswith("8-K"):
+        return None
+    ciks = src.get("ciks") or []
+    cik = ciks[0].zfill(10) if ciks else ""
+    display = (src.get("display_names") or [""])[0]
+    ticker = _parse_ticker_from_display(display)
+    items = src.get("items") or []
+    file_date = src.get("file_date") or ""
+    try:
+        published = datetime.fromisoformat(file_date + "T00:00:00+00:00") if file_date else now_utc()
+    except ValueError:
+        published = now_utc()
+    # Filing index URL: /Archives/edgar/data/<cik_int>/<adsh_no_dashes>/<adsh>-index.htm
+    acc_no_dashes = adsh.replace("-", "")
+    link = (
+        f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc_no_dashes}/{adsh}-index.htm"
+        if cik
+        else ""
+    )
+    return EdgarFiling(
+        accession=adsh,
+        form_type=form,
+        cik=cik,
+        title=f"{form} - {display}",
+        link=link,
+        published=published,
+        ticker=ticker,
+        items=list(items),
+        summary="",
+    )
+
+
+async def _fetch_search_index(form: str, days_back: int, user_agent: str) -> list[EdgarFiling]:
+    """Hit EDGAR full-text search-index for every <form> filing in the
+    [today-days_back, today] window. Returns an EdgarFiling for each
+    result (local dedup against `sources` happens in `_ingest_filing`).
+
+    Unlike the legacy `getcurrent` atom feed, this endpoint is not a
+    40-entry rolling window — it returns the complete list for the date
+    range, so we never miss filings that were accepted between polls
+    during a morning burst.
     """
-    m = re.search(r"(\d{10}-\d{2}-\d{6})", link)
-    if m:
-        return m.group(1)
-    m = re.search(r"accession-number=(\d{10}-\d{2}-\d{6})", link)
-    if m:
-        return m.group(1)
-    m = re.search(r"(\d{10}-\d{2}-\d{6})", title)
-    if m:
-        return m.group(1)
-    return None
+    from datetime import date, timedelta
 
-
-def _parse_accession_from_id_tag(id_tag: str) -> str | None:
-    """EDGAR entry `<id>` is 'urn:tag:sec.gov,2008:accession-number=XXX-XX-XXXXXX'."""
-    m = re.search(r"accession-number=(\d{10}-\d{2}-\d{6})", id_tag)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _parse_cik_from_link(link: str) -> str | None:
-    """Handles /Archives/edgar/data/<cik>/ (modern) and ?CIK=<cik> (older)."""
-    m = re.search(r"/Archives/edgar/data/(\d+)/", link)
-    if m:
-        return m.group(1).zfill(10)
-    m = re.search(r"[?&]CIK=(\d+)", link)
-    if m:
-        return m.group(1).zfill(10)
-    return None
-
-
-def _parse_cik_from_title(title: str) -> str | None:
-    """Title like '8-K - Company Name (0001234567) (Filer)'."""
-    m = re.search(r"\((\d{10})\)\s*\(Filer\)", title)
-    if m:
-        return m.group(1)
-    m = re.search(r"\((\d{10})\)", title)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _parse_form_type_from_title(title: str) -> str | None:
-    m = re.match(r"^([\w\-/]+)\s*-\s", title)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _parse_ticker_from_entry(entry: dict[str, Any]) -> str | None:
-    # EDGAR atom doesn't carry ticker — ticker resolution happens downstream
-    # via CIK lookup (cik_ticker table, not implemented yet).
-    _ = entry
-    return None
-
-
-def _parse_feed(content: str, form_filter: set[str]) -> list[EdgarFiling]:
-    """Parse EDGAR atom feed into EdgarFiling records.
-
-    Uses multiple fallback strategies for each field — real EDGAR URLs/titles
-    have changed multiple times over the years. Also extracts `items` (8-K item codes)
-    from the <summary> HTML so downstream filters can run without fetching the filing.
-    """
-    feed = feedparser.parse(content)
+    today = date.today()
+    start = today - timedelta(days=days_back)
+    url = EDGAR_SEARCH_URL.format(startdt=start.isoformat(), enddt=today.isoformat(), form=form)
+    raw = await _http_get(url, user_agent)
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        log.warning("edgar.search_index.parse_fail", error=str(e))
+        return []
+    hits = (data.get("hits") or {}).get("hits") or []
     out: list[EdgarFiling] = []
-    for entry in feed.entries:
-        raw_title = entry.get("title", "")
-        raw_link = entry.get("link", "")
-        raw_id = entry.get("id", "")
-        raw_summary = entry.get("summary", "")
-        title: str = raw_title if isinstance(raw_title, str) else str(raw_title or "")
-        link: str = raw_link if isinstance(raw_link, str) else str(raw_link or "")
-        id_tag: str = raw_id if isinstance(raw_id, str) else str(raw_id or "")
-        summary: str = raw_summary if isinstance(raw_summary, str) else str(raw_summary or "")
-
-        accession = _parse_accession_from_link(link, title) or _parse_accession_from_id_tag(id_tag)
-        if not accession:
-            continue
-
-        form = _parse_form_type_from_title(title) or title.split(" ", 1)[0].strip()
-        if form_filter and form not in form_filter:
-            continue
-
-        cik = _parse_cik_from_link(link) or _parse_cik_from_title(title) or ""
-        ticker = _parse_ticker_from_entry(dict(entry))
-        items = extract_items_from_summary(summary) if form.startswith("8-K") else []
-        published_raw_any = entry.get("updated") or entry.get("published")
-        published_raw = published_raw_any if isinstance(published_raw_any, str) else None
-        try:
-            published = (
-                datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
-                if published_raw
-                else now_utc()
-            )
-        except (ValueError, AttributeError):
-            published = now_utc()
-        out.append(
-            EdgarFiling(
-                accession=accession,
-                form_type=form,
-                cik=cik,
-                title=title,
-                link=link,
-                published=published,
-                ticker=ticker,
-                items=items,
-                summary=summary,
-            )
-        )
+    for h in hits:
+        filing = _build_filing_from_hit(h)
+        if filing is not None:
+            out.append(filing)
     return out
 
 
@@ -438,19 +390,19 @@ async def poll_once() -> int:
     settings = get_settings()
     forms = set(settings.edgar_form_types_list)
     ingested = 0
+    days_back = max(1, getattr(settings, "edgar_search_days_back", 2))
 
     # Load CIK→ticker map once per poll cycle (cached in Postgres with daily refresh).
     async with session_scope() as session:
         cik_map = await load_cik_ticker_map(session)
 
     for form in forms:
-        url = EDGAR_FEED_URL_TEMPLATE.format(form=form, count=40)
         try:
-            content = await _http_get(url, settings.sec_user_agent)
+            filings = await _fetch_search_index(form, days_back, settings.sec_user_agent)
         except Exception as e:
-            log.warning("edgar.feed_fail", form=form, error=str(e))
+            log.warning("edgar.search_index_fail", form=form, error=str(e))
             continue
-        filings = _parse_feed(content, form_filter={form})
+        log.info("edgar.search_index", form=form, candidates=len(filings))
         for f in filings:
             if await _ingest_filing(f, cik_map):
                 ingested += 1
