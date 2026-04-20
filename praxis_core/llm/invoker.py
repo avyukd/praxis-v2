@@ -230,11 +230,14 @@ class CLIInvoker:
                 )
                 finish = "timeout"
 
-            # Ensure process is reaped. If we're terminating early, kill the
-            # group — _kill_proc_tree sends SIGTERM first with a 60s grace
-            # window so Claude CLI can flush partial output and exit clean.
+            # Wall-timeout kill: give Claude CLI the full
+            # cli_sigint_grace_s window (default 270s = 4.5min) to wrap up
+            # on SIGINT. Because progressive-edit writes the dive file
+            # throughout generation, whatever's on disk at SIGINT time is
+            # already most of the dive — the grace is just for the CLI
+            # itself to emit its final `result` event and exit clean.
             if proc.returncode is None:
-                await self._kill_proc_tree(proc)
+                await self._kill_proc_tree(proc, sigint_grace_s=settings.cli_sigint_grace_s)
 
             try:
                 returncode = await asyncio.wait_for(proc.wait(), timeout=5)
@@ -277,36 +280,41 @@ class CLIInvoker:
                 log.debug("cli.invoke.session_cleanup_fail", error=str(e))
 
     @staticmethod
-    async def _kill_proc_tree(proc: asyncio.subprocess.Process) -> None:
-        """Graceful kill sequence. Verified empirically (see
-        /tmp/test_sigint*.py) that Claude CLI in `-p` / stream-json mode:
-          - on SIGINT: exits 0, emits a final `result` event (clean
-            telemetry — we capture tokens/cost); does NOT finalize any
-            in-flight tool call
-          - on SIGTERM: exits 143, truncates mid-stream, no `result`
-          - on SIGKILL: obvious
-        So: SIGINT first (15s grace) for clean telemetry, then SIGTERM
-        (15s grace) as a backup, then SIGKILL. The 60s previously allocated
-        to SIGTERM-grace wasn't buying partial-output preservation — that
-        has to come from the prompt telling the LLM to Write progressively.
+    async def _kill_proc_tree(
+        proc: asyncio.subprocess.Process, sigint_grace_s: int | None = None
+    ) -> None:
+        """Graceful kill sequence per empirical test (/tmp/test_sigint*.py):
+
+        Phase 1 — SIGINT (primary wrap-up signal). Claude CLI in `-p`
+          stream-json mode exits 0 with a final `result` event on SIGINT,
+          usually within <1s. The progressive-edit skeleton pattern in
+          handlers/_dive_base.py means the dive artifact is already on
+          disk at this point; SIGINT just tells the CLI "stop generating,
+          flush state, exit."
+        Phase 2 — SIGTERM (backup). CLI ignored SIGINT for the full grace
+          window — unusual. Give 15s to die.
+        Phase 3 — SIGKILL (last resort).
+
+        Grace window is configurable so callers can pick "clean 1-second
+        interrupt" (default 15s) vs "you have 4 minutes to finalize
+        whatever you're writing" (e.g. 270s from the wall-timeout path).
         """
         if proc.returncode is not None:
             return
+        grace = sigint_grace_s if sigint_grace_s is not None else 15
         try:
             pid = proc.pid
-            # Phase 1: SIGINT — clean exit with final result event
             try:
                 os.killpg(pid, signal.SIGINT)
             except (ProcessLookupError, PermissionError):
                 return
-            log.info("cli.invoke.sigint_sent", pid=pid, grace_s=15)
+            log.info("cli.invoke.sigint_sent", pid=pid, grace_s=grace)
             try:
-                await asyncio.wait_for(proc.wait(), timeout=15)
+                await asyncio.wait_for(proc.wait(), timeout=grace)
                 log.info("cli.invoke.sigint_clean_exit", pid=pid)
                 return
             except TimeoutError:
                 log.warning("cli.invoke.sigint_no_exit", pid=pid, action="sigterm")
-            # Phase 2: SIGTERM — process ignored SIGINT; harder shutdown
             try:
                 os.killpg(pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
@@ -317,7 +325,6 @@ class CLIInvoker:
                 return
             except TimeoutError:
                 log.warning("cli.invoke.sigterm_no_exit", pid=pid, action="sigkill")
-            # Phase 3: SIGKILL — unavoidable termination
             try:
                 os.killpg(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):

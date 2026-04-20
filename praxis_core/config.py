@@ -25,13 +25,17 @@ class Settings(BaseSettings):
     worker_cancel_poll_interval_s: int = 5
     # Claude CLI quiet-stream timeout. A dive doing WebFetch + multiple MCP
     # tool calls can legitimately go 2-3 minutes between stdout events; a
-    # 60s cap was killing legitimate work. Bumped to 5 min.
+    # 60s cap was killing legitimate work.
     cli_no_event_timeout_s: int = 300
-    # Wall clock for a single LLM invocation. Deep research dives can run
-    # 30+ min pulling SEC filings and building tables; we'd rather let them
-    # finish than kill and lose state. 1 hour is the hard ceiling; SIGTERM
-    # sent first so the CLI flushes output, then SIGKILL after grace window.
-    cli_wall_clock_timeout_s: int = 3600
+    # Wall clock triggers a SIGINT to the CLI. With progressive-edit
+    # skeleton writes (see handlers/_dive_base.py) the dive artifact on
+    # disk is already good; SIGINT tells the CLI to wrap up and emit a
+    # final `result` event. We then wait cli_sigint_grace_s for the CLI
+    # to exit cleanly before escalating to SIGKILL — empirically the CLI
+    # honors SIGINT in <1s, so 270s is generous. Total: 15min SIGINT,
+    # 19.5min SIGKILL. Worker-level wall (cli + 300s buffer) caps at 20min.
+    cli_wall_clock_timeout_s: int = 900
+    cli_sigint_grace_s: int = 270
 
     rate_limit_initial_backoff_s_min: int = 180
     rate_limit_initial_backoff_s_max: int = 300
