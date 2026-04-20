@@ -38,7 +38,17 @@
       "mcp__fundamentals__get_earnings",
       "mcp__fundamentals__get_holders",
       "mcp__fundamentals__get_price",
-      "mcp__fundamentals__search_fundamentals"
+      "mcp__fundamentals__search_fundamentals",
+      "mcp__praxis__open_investigation",
+      "mcp__praxis__boost_ticker",
+      "mcp__praxis__reprioritize",
+      "mcp__praxis__cancel_task",
+      "mcp__praxis__cancel_investigation",
+      "mcp__praxis__override_investability",
+      "mcp__praxis__requeue_dead_letter",
+      "mcp__praxis__clear_rate_limit",
+      "mcp__praxis__file_to_vault",
+      "mcp__praxis__ingest_source"
     ],
     "deny": [
       "Write",
@@ -52,16 +62,7 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git rebase:*)",
-      "Bash(git reset:*)",
-      "mcp__praxis__cancel_task",
-      "mcp__praxis__cancel_investigation",
-      "mcp__praxis__reprioritize",
-      "mcp__praxis__boost_ticker",
-      "mcp__praxis__open_investigation",
-      "mcp__praxis__file_to_vault",
-      "mcp__praxis__ingest_source",
-      "mcp__praxis__requeue_dead_letter",
-      "mcp__praxis__clear_rate_limit"
+      "Bash(git reset:*)"
     ]
   },
   "env": {

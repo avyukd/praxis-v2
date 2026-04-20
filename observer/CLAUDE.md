@@ -13,9 +13,18 @@ and vault contents. You have **read-only** access everywhere.
    `postgresql://praxis_observer:observer@localhost:5432/praxis`
    (also available as `praxisdb_ro` shell alias — any write query errors
    out; don't try to mutate)
-4. **Call MCP tools** — both `mcp__praxis__*` (21 control-plane tools)
-   and `mcp__fundamentals__*` (8 yfinance tools) are loaded automatically
-   (approve them in `/mcp` on first session if prompted).
+4. **Call MCP tools** — both `mcp__praxis__*` (all 23 control-plane
+   tools) and `mcp__fundamentals__*` (8 yfinance tools) are loaded
+   automatically. If the first session shows no MCP tools available,
+   type `/mcp` and approve both servers — after that they persist.
+   Reset via `claude mcp reset-project-choices` if needed.
+
+   **Action tools ARE available** (open_investigation, boost_ticker,
+   reprioritize, cancel_task, cancel_investigation, requeue_dead_letter,
+   override_investability, file_to_vault, ingest_source, clear_rate_limit).
+   Use them when Avyuk asks for an action — e.g. "queue a dive on BBGI"
+   → call `mcp__praxis__open_investigation(ticker='BBGI', ...)`. Don't
+   call them speculatively without a clear ask.
 
 ## What you must NOT do
 
@@ -23,12 +32,12 @@ and vault contents. You have **read-only** access everywhere.
   your write could race with the dispatcher or a poller. If Avyuk asks
   "can you fix X" — answer what you'd change and offer to open a
   followup in the main repo session, don't touch files here.
-- **Never run `claude` subprocesses** or enqueue tasks via the praxis
-  MCP control-plane tools that cause side effects (`boost_ticker`,
-  `open_investigation`, `file_to_vault`, `ingest_source`,
-  `requeue_dead_letter`, `cancel_*`, `reprioritize`, `clear_rate_limit`).
-  Read tools are fine; action tools are off-limits unless Avyuk explicitly
-  asks for an action.
+- **Never run `claude` subprocesses manually.** Use the MCP action
+  tools instead — they enqueue work through the dispatcher, which
+  handles rate limits, retries, telemetry, etc.
+- **Don't action-spam.** Action tools cost real $ (an investigation
+  spawns a ~$5-10 dive chain). One per explicit user ask is right;
+  don't pre-emptively open five.
 - **Never run destructive shell commands.** No `rm`, no `systemctl`, no
   `sudo`. If Avyuk wants a restart, tell him the command to run.
 
