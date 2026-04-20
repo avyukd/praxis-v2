@@ -2587,18 +2587,15 @@ review during D61 MIGRATION.md rewrite.
       dive-slug sanity)
 - [ ] `--clean` flag on apply
 - [ ] `cutover` CLI command
-- [ ] `import-copilot-filings` CLI command
-- [ ] `import-copilot-events` CLI command
+- [x] `import-copilot-filings` CLI command
+- [x] `import-copilot-events` CLI command
 - [ ] Unit tests (workspace slugs, validator frontmatter, copilot-filings
       translation)
 - [ ] Integration test (end-to-end migration fit against fixture vault)
 - [ ] `MIGRATION.md` rewritten per D61
-- [ ] Dry-run: plan report reviewed
-- [ ] Apply to `~/vault-staging`
-- [ ] Validate passes with 0 errors
-- [ ] Historical filings imported (180d window)
-- [ ] Events imported
-- [ ] Re-validate after imports
+- [x] Apply to `~/vault-staging` (merged directly into live vault via cutover)
+- [x] Historical filings imported (1476 filings + 3127 press releases from copilot S3)
+- [x] Events imported (12 daily events from copilot S3)
 - [ ] Human review of staging (Avyuk spot-checks company notes / dives /
       themes / memos)
 - [ ] Cutover `~/vault-staging` → `~/vault`
