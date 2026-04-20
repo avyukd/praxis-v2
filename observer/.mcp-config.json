@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "praxis": {
+      "command": "/home/avyuk/.local/bin/uv",
+      "args": ["run", "--project", "/home/avyuk/dev/praxis-v2", "python", "-m", "services.mcp.server"],
+      "cwd": "/home/avyuk/dev/praxis-v2"
+    },
+    "fundamentals": {
+      "command": "/home/avyuk/.local/bin/uv",
+      "args": ["run", "--project", "/home/avyuk/dev/praxis-v2", "python", "-m", "services.mcp.fundamentals.server"],
+      "cwd": "/home/avyuk/dev/praxis-v2"
+    }
+  }
+}
