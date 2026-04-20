@@ -69,6 +69,7 @@ def _build_registry() -> HandlerRegistry:
         orchestrate_dive,
         rate_limit_probe,
         refresh_index,
+        surface_ideas,
         synthesize_memo,
         triage_filing,
     )
@@ -92,6 +93,7 @@ def _build_registry() -> HandlerRegistry:
     r.register("generate_daily_journal", generate_daily_journal.handle)
     r.register("rate_limit_probe", rate_limit_probe.handle)
     r.register("cleanup_sessions", cleanup_sessions.handle)
+    r.register("surface_ideas", surface_ideas.handle)
     return r
 
 

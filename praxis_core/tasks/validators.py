@@ -145,22 +145,24 @@ _MIN_NOTE_LEN = 100  # "x" alone shouldn't pass validation
 
 
 def validate_compile_to_wiki(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
-    """Checks that compile_to_wiki actually produced compiled knowledge.
+    """Validates compile_to_wiki artifacts per Section D D39 + D43 + D38.
 
-    Beyond file existence:
-      - INDEX and LOG touched (minimum).
-      - For ticker compiles: notes.md + journal.md exist AND are non-trivial.
-      - notes.md references the analysis_path (proves compile actually read the source,
-        not just appended filler to pass a file-count check).
+    Changes from prior version:
+      - No longer requires INDEX.md (D39 decouples INDEX from compile)
+      - Strict wikilink regex for analysis backlink (D43): [[<analysis_path>]]
+        with literal brackets, not bare substring
+      - Shrink-guard: if a pre-write backup exists in _backups/compile/,
+        notes.md must not have lost >25% of content (D38)
     """
+    import re as _re
+
     payload = CompileToWikiPayload.model_validate(payload_raw)
     ok: list[str] = []
     missing: list[str] = []
     malformed: list[ValidationMalformed] = []
 
-    for p in (vc.index_path(vault_root), vc.log_path(vault_root)):
-        s, exists = _check_file_exists(p)
-        (ok if exists else missing).append(s)
+    s_log, log_exists = _check_file_exists(vc.log_path(vault_root))
+    (ok if log_exists else missing).append(s_log)
 
     if payload.ticker:
         notes = vc.company_notes_path(vault_root, payload.ticker)
@@ -176,22 +178,61 @@ def validate_compile_to_wiki(payload_raw: dict[str, Any], vault_root: Path) -> V
                         reason=f"notes.md too small ({len(text_body)} chars < {_MIN_NOTE_LEN})",
                     )
                 )
-            elif payload.analysis_path and payload.analysis_path not in text_body:
-                malformed.append(
-                    ValidationMalformed(
-                        path=s_notes,
-                        reason=f"notes.md missing backlink to {payload.analysis_path}",
-                    )
+            elif payload.analysis_path:
+                # D43: require wikilink form, not just substring
+                wl_pattern = _re.escape(payload.analysis_path)
+                wl_match = _re.search(
+                    rf"\[\[{wl_pattern}(?:\|[^\]]+)?(?:#[^\]]+)?\]\]", text_body
                 )
+                if not wl_match:
+                    malformed.append(
+                        ValidationMalformed(
+                            path=s_notes,
+                            reason=(
+                                f"notes.md missing wikilink [[{payload.analysis_path}]] — "
+                                "bare substring refs no longer accepted"
+                            ),
+                        )
+                    )
+                else:
+                    ok.append(s_notes)
             else:
                 ok.append(s_notes)
+
+            # D38 shrink-guard: find latest backup for this ticker, compare sizes
+            backups_root = vault_root / "_backups" / "compile"
+            if backups_root.exists():
+                candidates: list[Path] = []
+                for date_dir in backups_root.iterdir():
+                    if not date_dir.is_dir():
+                        continue
+                    for f in date_dir.iterdir():
+                        if f.is_file() and payload.ticker.upper() in f.name:
+                            candidates.append(f)
+                if candidates:
+                    latest = max(candidates, key=lambda p: p.stat().st_mtime)
+                    try:
+                        prior_size = latest.stat().st_size
+                        current_size = notes.stat().st_size
+                        if prior_size > 0 and current_size < prior_size * 0.75:
+                            malformed.append(
+                                ValidationMalformed(
+                                    path=s_notes,
+                                    reason=(
+                                        f"notes.md shrunk {prior_size}→{current_size} bytes "
+                                        f"(>25% loss; backup at {latest})"
+                                    ),
+                                )
+                            )
+                    except OSError:
+                        pass
         else:
             missing.append(s_notes)
 
         s_journal, j_exists = _check_file_exists(journal)
         if j_exists:
             jtext = journal.read_text(encoding="utf-8", errors="replace")
-            if len(jtext) < 20:  # journal is append-only; should have at least one dated line
+            if len(jtext) < 20:
                 malformed.append(
                     ValidationMalformed(path=s_journal, reason="journal.md effectively empty")
                 )
@@ -201,10 +242,10 @@ def validate_compile_to_wiki(payload_raw: dict[str, Any], vault_root: Path) -> V
             missing.append(s_journal)
 
     touched = len(ok)
-    if touched < 3:
+    if touched < 2:  # D39 — lowered from 3 since INDEX.md no longer required
         malformed.append(
             ValidationMalformed(
-                path="<compile>", reason=f"compile touched only {touched} files; need ≥3"
+                path="<compile>", reason=f"compile touched only {touched} files; need ≥2"
             )
         )
     return ValidationResult(ok=ok, missing=missing, malformed=malformed)

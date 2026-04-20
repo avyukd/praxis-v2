@@ -154,7 +154,7 @@ def test_compile_to_wiki_missing_backlink_fails(tmp_path: Path) -> None:
     _write(vc.company_journal_path(tmp_path, "NVDA"), "- 2026-04-18 compiled")
     r = validate_compile_to_wiki(payload, tmp_path)
     assert r.is_partial
-    assert any("missing backlink" in m.reason for m in r.malformed)
+    assert any("missing wikilink" in m.reason for m in r.malformed)
 
 
 def test_compile_to_wiki_empty_journal_fails(tmp_path: Path) -> None:
