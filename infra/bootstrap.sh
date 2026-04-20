@@ -91,7 +91,7 @@ if [[ ! -f "${VAULT_DIR}/CLAUDE.md" ]]; then
   su - "${PRAXIS_USER}" -c "cp ${INSTALL_ROOT}/vault_seed/LOG.md ${VAULT_DIR}/LOG.md"
 fi
 
-echo "[bootstrap] rendering .mcp-config.json"
+echo "[bootstrap] rendering .mcp.json"
 su - "${PRAXIS_USER}" -c "REPO_ROOT=${INSTALL_ROOT} VAULT_ROOT=${VAULT_DIR} UV_BIN=~/.local/bin/uv bash ${INSTALL_ROOT}/infra/render_mcp_config.sh"
 
 echo ""

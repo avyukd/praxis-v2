@@ -1,6 +1,6 @@
 """Fundamentals MCP server (D25) — yfinance-backed, Postgres-cached.
 
-Runs over stdio. Registered in vault `.mcp-config.json` under the
+Runs over stdio. Registered in vault `.mcp.json` under the
 `fundamentals` server name so its tools surface as
 `mcp__fundamentals__<tool>`.
 """

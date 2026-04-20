@@ -51,10 +51,10 @@ async def run_llm(
 def _mcp_config_for_vault(vault_root: Path) -> Path | None:
     """Look for an MCP config file the worker can use.
 
-    We write a generic one at <vault>/.mcp-config.json that points at our MCP server.
+    We write a generic one at <vault>/.mcp.json that points at our MCP server.
     If not present, invoker runs without MCP.
     """
-    cfg = vault_root / ".mcp-config.json"
+    cfg = vault_root / ".mcp.json"
     return cfg if cfg.exists() else None
 
 

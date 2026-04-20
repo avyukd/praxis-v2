@@ -14,7 +14,8 @@ and vault contents. You have **read-only** access everywhere.
    (also available as `praxisdb_ro` shell alias — any write query errors
    out; don't try to mutate)
 4. **Call MCP tools** — both `mcp__praxis__*` (21 control-plane tools)
-   and `mcp__fundamentals__*` (8 yfinance tools) are loaded automatically.
+   and `mcp__fundamentals__*` (8 yfinance tools) are loaded automatically
+   (approve them in `/mcp` on first session if prompted).
 
 ## What you must NOT do
 

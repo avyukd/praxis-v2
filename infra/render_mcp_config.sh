@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Render vault/.mcp-config.json from the template, substituting install paths.
+# Render vault/.mcp.json from the template, substituting install paths.
 # Can be run anytime after the vault and repo exist (re-runnable).
 set -euo pipefail
 
@@ -7,8 +7,8 @@ REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 VAULT_ROOT="${VAULT_ROOT:-${HOME}/vault}"
 UV_BIN="${UV_BIN:-$(command -v uv || echo /usr/local/bin/uv)}"
 
-TEMPLATE="${REPO_ROOT}/vault_seed/.mcp-config.json.template"
-TARGET="${VAULT_ROOT}/.mcp-config.json"
+TEMPLATE="${REPO_ROOT}/vault_seed/.mcp.json.template"
+TARGET="${VAULT_ROOT}/.mcp.json"
 
 if [[ ! -f "$TEMPLATE" ]]; then
   echo "template not found: $TEMPLATE" >&2
