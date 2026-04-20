@@ -48,7 +48,7 @@ class Task(Base):
     parent_task_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL")
     )
-    depends_on: Mapped[list[uuid.UUID] | None] = mapped_column(ARRAY(UUID(as_uuid=True)))
+    # depends_on column dropped per D26 (dead code)
 
     lease_holder: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -114,6 +114,10 @@ class Investigation(Base):
     )
     artifacts: Mapped[list[str] | None] = mapped_column(ARRAY(String))
     vault_path: Mapped[str | None] = mapped_column(String(512))
+    # D21 — research priority 0-10 (drives ResearchBudget)
+    research_priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=5, server_default="5"
+    )
 
     tasks: Mapped[list[Task]] = relationship(
         "Task", back_populates="investigation", foreign_keys="Task.investigation_id"

@@ -125,11 +125,12 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
         async with session_scope() as session:
             await _ensure_investigation(session)
 
-    # Default plan if LLM didn't write one or we can't parse it
+    # Default plan if LLM didn't write one or we can't parse it (D19 taxonomy)
     default_plan: list[TaskType] = [
-        TaskType.DIVE_BUSINESS,
-        TaskType.DIVE_MOAT,
-        TaskType.DIVE_FINANCIALS,
+        TaskType.DIVE_FINANCIAL_RIGOROUS,
+        TaskType.DIVE_BUSINESS_MOAT,
+        TaskType.DIVE_INDUSTRY_STRUCTURE,
+        TaskType.DIVE_CAPITAL_ALLOCATION,
         TaskType.SYNTHESIZE_MEMO,
     ]
 
@@ -191,20 +192,15 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
                 select(Investigation).where(Investigation.handle == payload.investigation_handle)
             )
         ).scalar_one()
-        prior: uuid.UUID | None = None
         for task_type, sub_payload in plan_sequence:
-            dep = [prior] if prior else None
-            new_id = await enqueue_task(
+            await enqueue_task(
                 s,
                 task_type=task_type,
                 payload=sub_payload,
                 priority=2,  # P2: Loop B dive lane
                 dedup_key=f"{task_type.value}:{payload.investigation_handle}",
                 investigation_id=inv.id,
-                depends_on=dep,
             )
-            if new_id:
-                prior = new_id
 
     if ctx.session is not None:
         await _enqueue_sequence(ctx.session)

@@ -39,19 +39,24 @@ async def enqueue_task(
     dedup_key: str | None = None,
     investigation_id: uuid.UUID | None = None,
     parent_task_id: uuid.UUID | None = None,
-    depends_on: list[uuid.UUID] | None = None,
     model: TaskModel | None = None,
     max_attempts: int | None = None,
+    resource_key: str | None = None,
     resource_key_override: str | None = None,
 ) -> uuid.UUID | None:
     """Insert a task row, respecting dedup_key via ON CONFLICT DO NOTHING.
 
     Returns task id if inserted, None if dedup'd.
+
+    `resource_key` and `resource_key_override` are both supported for
+    backward compat; either may specify a key explicitly. Otherwise
+    derived from TASK_RESOURCE_KEYS + payload.
     """
     task_type = TaskType(task_type)
     validate_payload(task_type.value, payload)
     resolved_model = model or MODEL_TIERS[task_type]
-    resource_key = resource_key_override or _resource_key_for(task_type, payload)
+    explicit = resource_key or resource_key_override
+    final_resource_key = explicit or _resource_key_for(task_type, payload)
 
     stmt = insert(Task).values(
         type=task_type.value,
@@ -60,10 +65,9 @@ async def enqueue_task(
         model=resolved_model.value,
         payload=payload,
         dedup_key=dedup_key,
-        resource_key=resource_key,
+        resource_key=final_resource_key,
         investigation_id=investigation_id,
         parent_task_id=parent_task_id,
-        depends_on=depends_on,
         attempts=0,
         rate_limit_bounces=0,
         max_attempts=max_attempts if max_attempts is not None else 3,

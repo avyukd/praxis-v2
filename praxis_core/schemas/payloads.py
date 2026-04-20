@@ -68,21 +68,45 @@ class OrchestrateDivePayload(BaseModel):
     ticker: str
     investigation_handle: str
     thesis_handle: str | None = None
+    research_priority: int = 5
 
 
-class DiveBusinessPayload(BaseModel):
+class DiveSpecialistPayload(BaseModel):
+    """Shared shape for all specialist dives (D19)."""
+
     ticker: str
     investigation_handle: str
+    research_priority: int = 5
 
 
-class DiveMoatPayload(BaseModel):
-    ticker: str
-    investigation_handle: str
+class DiveFinancialRigorousPayload(DiveSpecialistPayload):
+    pass
 
 
-class DiveFinancialsPayload(BaseModel):
-    ticker: str
-    investigation_handle: str
+class DiveBusinessMoatPayload(DiveSpecialistPayload):
+    pass
+
+
+class DiveIndustryStructurePayload(DiveSpecialistPayload):
+    pass
+
+
+class DiveCapitalAllocationPayload(DiveSpecialistPayload):
+    pass
+
+
+class DiveGeopoliticalRiskPayload(DiveSpecialistPayload):
+    pass
+
+
+class DiveMacroPayload(DiveSpecialistPayload):
+    pass
+
+
+class DiveCustomPayload(DiveSpecialistPayload):
+    specialty: str
+    why: str = ""
+    focus: str = ""
 
 
 class SynthesizeMemoPayload(BaseModel):
@@ -115,21 +139,31 @@ class CleanupSessionsPayload(BaseModel):
     triggered_by: str = "scheduler"
 
 
+class SurfaceIdeasPayload(BaseModel):
+    triggered_by: str = "scheduler"
+    focus: str | None = None
+
+
 PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "triage_filing": TriageFilingPayload,
     "analyze_filing": AnalyzeFilingPayload,
     "compile_to_wiki": CompileToWikiPayload,
     "notify": NotifyPayload,
     "orchestrate_dive": OrchestrateDivePayload,
-    "dive_business": DiveBusinessPayload,
-    "dive_moat": DiveMoatPayload,
-    "dive_financials": DiveFinancialsPayload,
+    "dive_financial_rigorous": DiveFinancialRigorousPayload,
+    "dive_business_moat": DiveBusinessMoatPayload,
+    "dive_industry_structure": DiveIndustryStructurePayload,
+    "dive_capital_allocation": DiveCapitalAllocationPayload,
+    "dive_geopolitical_risk": DiveGeopoliticalRiskPayload,
+    "dive_macro": DiveMacroPayload,
+    "dive_custom": DiveCustomPayload,
     "synthesize_memo": SynthesizeMemoPayload,
     "refresh_index": RefreshIndexPayload,
     "lint_vault": LintVaultPayload,
     "generate_daily_journal": GenerateDailyJournalPayload,
     "rate_limit_probe": RateLimitProbePayload,
     "cleanup_sessions": CleanupSessionsPayload,
+    "surface_ideas": SurfaceIdeasPayload,
 }
 
 

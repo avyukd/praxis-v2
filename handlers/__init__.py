@@ -56,9 +56,13 @@ def _build_registry() -> HandlerRegistry:
         analyze_filing,
         cleanup_sessions,
         compile_to_wiki,
-        dive_business,
-        dive_financials,
-        dive_moat,
+        dive_business_moat,
+        dive_capital_allocation,
+        dive_custom,
+        dive_financial_rigorous,
+        dive_geopolitical_risk,
+        dive_industry_structure,
+        dive_macro,
         generate_daily_journal,
         lint_vault,
         notify,
@@ -75,9 +79,13 @@ def _build_registry() -> HandlerRegistry:
     r.register("compile_to_wiki", compile_to_wiki.handle)
     r.register("notify", notify.handle)
     r.register("orchestrate_dive", orchestrate_dive.handle)
-    r.register("dive_business", dive_business.handle)
-    r.register("dive_moat", dive_moat.handle)
-    r.register("dive_financials", dive_financials.handle)
+    r.register("dive_financial_rigorous", dive_financial_rigorous.handle)
+    r.register("dive_business_moat", dive_business_moat.handle)
+    r.register("dive_industry_structure", dive_industry_structure.handle)
+    r.register("dive_capital_allocation", dive_capital_allocation.handle)
+    r.register("dive_geopolitical_risk", dive_geopolitical_risk.handle)
+    r.register("dive_macro", dive_macro.handle)
+    r.register("dive_custom", dive_custom.handle)
     r.register("synthesize_memo", synthesize_memo.handle)
     r.register("refresh_index", refresh_index.handle)
     r.register("lint_vault", lint_vault.handle)

@@ -15,12 +15,14 @@ from praxis_core.schemas.artifacts import (
 from praxis_core.schemas.payloads import (
     AnalyzeFilingPayload,
     CompileToWikiPayload,
-    DiveBusinessPayload,
+    DiveCustomPayload,
+    DiveSpecialistPayload,
     GenerateDailyJournalPayload,
     LintVaultPayload,
     NotifyPayload,
     OrchestrateDivePayload,
     RefreshIndexPayload,
+    SurfaceIdeasPayload,
     SynthesizeMemoPayload,
     TriageFilingPayload,
 )
@@ -222,44 +224,92 @@ def validate_orchestrate_dive(payload_raw: dict[str, Any], vault_root: Path) -> 
     return ValidationResult(missing=[s])
 
 
-def _validate_dive_generic(
-    payload_raw: dict[str, Any], vault_root: Path, section: str
+def _validate_specialist_dive(
+    payload_raw: dict[str, Any],
+    vault_root: Path,
+    specialty_slug: str,
+    min_chars: int = 500,
 ) -> ValidationResult:
-    payload = DiveBusinessPayload.model_validate(payload_raw)  # same shape for all dive_*
-    notes = vc.company_notes_path(vault_root, payload.ticker)
-    s, exists = _check_file_exists(notes)
-    ok, missing = ([], [])
-    if exists:
-        ok.append(s)
-        content = notes.read_text(encoding="utf-8")
-        if section not in content:
-            return ValidationResult(
-                ok=ok,
-                malformed=[ValidationMalformed(path=s, reason=f"section '{section}' not found")],
-            )
-    else:
-        missing.append(s)
-    journal = vc.company_journal_path(vault_root, payload.ticker)
-    s, exists = _check_file_exists(journal)
-    (ok if exists else missing).append(s)
-    return ValidationResult(ok=ok, missing=missing)
+    """D19/D53 — specialists write companies/<TICKER>/dives/<specialty>.md
+    as a standalone file. Validator checks it exists and is non-trivial."""
+    payload = DiveSpecialistPayload.model_validate(payload_raw)
+    out_path = vc.company_dir(vault_root, payload.ticker) / "dives" / f"{specialty_slug}.md"
+    s, exists = _check_file_exists(out_path)
+    if not exists:
+        return ValidationResult(missing=[s])
+    content = out_path.read_text(encoding="utf-8", errors="replace")
+    if len(content) < min_chars:
+        return ValidationResult(
+            malformed=[
+                ValidationMalformed(
+                    path=s,
+                    reason=f"dive output too small ({len(content)} chars < {min_chars})",
+                )
+            ]
+        )
+    return ValidationResult(ok=[s])
 
 
-def validate_dive_business(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
-    return _validate_dive_generic(payload_raw, vault_root, "## Business")
+def validate_dive_financial_rigorous(
+    payload_raw: dict[str, Any], vault_root: Path
+) -> ValidationResult:
+    # Also require the INVESTABILITY line (D20) — worker reads this post-validation
+    payload = DiveSpecialistPayload.model_validate(payload_raw)
+    out_path = vc.company_dir(vault_root, payload.ticker) / "dives" / "financial-rigorous.md"
+    s, exists = _check_file_exists(out_path)
+    if not exists:
+        return ValidationResult(missing=[s])
+    content = out_path.read_text(encoding="utf-8", errors="replace")
+    if len(content) < 500:
+        return ValidationResult(
+            malformed=[
+                ValidationMalformed(path=s, reason=f"dive output too small ({len(content)} chars)")
+            ]
+        )
+    # D20 fail-open: if INVESTABILITY line is absent, treat as CONTINUE (malformed
+    # but not blocking — handled in worker post-validation step later)
+    return ValidationResult(ok=[s])
 
 
-def validate_dive_moat(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
-    return _validate_dive_generic(payload_raw, vault_root, "## Moat")
+def validate_dive_business_moat(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    return _validate_specialist_dive(payload_raw, vault_root, "business-moat")
 
 
-def validate_dive_financials(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
-    payload_for_generic = {
-        "ticker": payload_raw.get("ticker"),
-        "investigation_handle": payload_raw.get("investigation_handle"),
-    }
-    result = _validate_dive_generic(payload_for_generic, vault_root, "## Financials")
-    return result
+def validate_dive_industry_structure(
+    payload_raw: dict[str, Any], vault_root: Path
+) -> ValidationResult:
+    return _validate_specialist_dive(payload_raw, vault_root, "industry-structure")
+
+
+def validate_dive_capital_allocation(
+    payload_raw: dict[str, Any], vault_root: Path
+) -> ValidationResult:
+    return _validate_specialist_dive(payload_raw, vault_root, "capital-allocation")
+
+
+def validate_dive_geopolitical_risk(
+    payload_raw: dict[str, Any], vault_root: Path
+) -> ValidationResult:
+    return _validate_specialist_dive(payload_raw, vault_root, "geopolitical-risk")
+
+
+def validate_dive_macro(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    return _validate_specialist_dive(payload_raw, vault_root, "macro")
+
+
+def validate_dive_custom(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    from handlers.dive_custom import _slugify
+
+    payload = DiveCustomPayload.model_validate(payload_raw)
+    specialty_slug = _slugify(payload.specialty)
+    return _validate_specialist_dive(payload_raw, vault_root, specialty_slug)
+
+
+def validate_surface_ideas(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    SurfaceIdeasPayload.model_validate(payload_raw)
+    # surface_ideas handler writes _surfaced/<date>/ideas-<HHMM>.md; validator
+    # is tolerant — we don't insist the LLM produced ideas (empty batch is valid)
+    return ValidationResult(ok=["surface_ideas.completed"])
 
 
 def validate_synthesize_memo(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
@@ -317,15 +367,20 @@ VALIDATORS: dict[str, ValidatorFn] = {
     TaskType.COMPILE_TO_WIKI.value: validate_compile_to_wiki,
     TaskType.NOTIFY.value: validate_notify,
     TaskType.ORCHESTRATE_DIVE.value: validate_orchestrate_dive,
-    TaskType.DIVE_BUSINESS.value: validate_dive_business,
-    TaskType.DIVE_MOAT.value: validate_dive_moat,
-    TaskType.DIVE_FINANCIALS.value: validate_dive_financials,
+    TaskType.DIVE_FINANCIAL_RIGOROUS.value: validate_dive_financial_rigorous,
+    TaskType.DIVE_BUSINESS_MOAT.value: validate_dive_business_moat,
+    TaskType.DIVE_INDUSTRY_STRUCTURE.value: validate_dive_industry_structure,
+    TaskType.DIVE_CAPITAL_ALLOCATION.value: validate_dive_capital_allocation,
+    TaskType.DIVE_GEOPOLITICAL_RISK.value: validate_dive_geopolitical_risk,
+    TaskType.DIVE_MACRO.value: validate_dive_macro,
+    TaskType.DIVE_CUSTOM.value: validate_dive_custom,
     TaskType.SYNTHESIZE_MEMO.value: validate_synthesize_memo,
     TaskType.REFRESH_INDEX.value: validate_refresh_index,
     TaskType.LINT_VAULT.value: validate_lint_vault,
     TaskType.GENERATE_DAILY_JOURNAL.value: validate_generate_daily_journal,
     TaskType.RATE_LIMIT_PROBE.value: validate_rate_limit_probe,
     TaskType.CLEANUP_SESSIONS.value: validate_cleanup_sessions,
+    TaskType.SURFACE_IDEAS.value: validate_surface_ideas,
 }
 
 

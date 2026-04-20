@@ -2,11 +2,16 @@
 
 The orchestrator LLM writes a plan like:
     ## Plan
-    1. dive_business — understand segments first
-    2. dive_moat — then moat durability
-    3. synthesize_memo — crystallize
+    1. dive_financial_rigorous — always first, emits INVESTABILITY line
+    2. dive_business_moat — understand business + moat
+    3. dive_industry_structure — cycle + structural trends
+    4. dive_custom specialty=uranium-market-specialist
+       why: UUUU pricing hinges on spot uranium
+       focus: Cameco Q3, Sprott Physical flows
+    5. synthesize_memo — crystallize
 
-We extract `["dive_business", "dive_moat", "synthesize_memo"]` in order, ignoring prose.
+We extract the ordered list of task types. dive_custom carries additional
+`specialty`, `why`, `focus` fields parsed from the indented lines below.
 """
 
 from __future__ import annotations
@@ -16,9 +21,13 @@ import re
 from praxis_core.schemas.task_types import TaskType
 
 VALID_DIVE_TASK_TYPES: tuple[TaskType, ...] = (
-    TaskType.DIVE_BUSINESS,
-    TaskType.DIVE_MOAT,
-    TaskType.DIVE_FINANCIALS,
+    TaskType.DIVE_FINANCIAL_RIGOROUS,
+    TaskType.DIVE_BUSINESS_MOAT,
+    TaskType.DIVE_INDUSTRY_STRUCTURE,
+    TaskType.DIVE_CAPITAL_ALLOCATION,
+    TaskType.DIVE_GEOPOLITICAL_RISK,
+    TaskType.DIVE_MACRO,
+    TaskType.DIVE_CUSTOM,
     TaskType.SYNTHESIZE_MEMO,
 )
 
