@@ -20,7 +20,6 @@ from praxis_core.newswire.dedup import dedup_releases, fetch_release_text
 from praxis_core.newswire.gnw import GNW_CA_FEEDS, poll_gnw
 from praxis_core.newswire.models import PressRelease
 from praxis_core.newswire.newsfile import poll_newsfile
-from praxis_core.newswire.state import get_state, set_state
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
 from praxis_core.schemas.task_types import TaskType
@@ -30,8 +29,6 @@ from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import atomic_write
 
 log = get_logger("pollers.press_ca")
-
-STATE_KEY = "poller_state.press_ca.last_seen"
 
 # CA-specific mcap cap (D16). Starting at $2B USD equivalent; tune later.
 CA_MARKET_CAP_MAX_USD = 2_000_000_000
@@ -228,57 +225,27 @@ async def _process_release(release: PressRelease) -> ReleaseResult:
     return ReleaseResult.INGESTED
 
 
-def _pos(r: PressRelease) -> tuple[str, str]:
-    return (r.published_at or "", r.release_id)
-
-
 async def poll_once() -> int:
-    async with session_scope() as session:
-        state = await get_state(session, STATE_KEY)
-    last_seen: dict[str, dict[str, str]] = dict(state.get("last_seen", {}))
-
+    """Fetch all three CA newswires and run each candidate through
+    _process_release. Dedup is authoritative via the seen-set lookup
+    inside _process_release (sources.dedup_key). No cursor — polling
+    the same 20-40 items per cycle is fine and avoids cursor-pollution
+    bugs (CNW publishes pub_at as "14:30 ET" today but "Apr 18, 2026,
+    02:04 ET" for older items, so lexicographic cursor comparison was
+    silently skipping today's new releases whenever the cursor got
+    advanced past a full-date entry)."""
     from_gnw = await poll_gnw(GNW_CA_FEEDS)
     from_newsfile = await poll_newsfile()
     from_cnw = await poll_cnw(pages=2)
 
     all_releases = list(from_gnw + from_newsfile + from_cnw)
     all_releases = dedup_releases(all_releases)
-    all_releases.sort(key=_pos)
 
-    # Per-source last-seen gating — skip anything <= cursor.
-    new_releases: list[PressRelease] = []
-    for r in all_releases:
-        src = r.source
-        last = last_seen.get(src, {"published_at": "", "release_id": ""})
-        last_pos = (last.get("published_at", ""), last.get("release_id", ""))
-        if _pos(r) <= last_pos:
-            continue
-        new_releases.append(r)
-
-    # Advance the cursor ONLY past releases that reached a terminal state
-    # (ingested or persisted rejection). Transient failures stay unseen so
-    # the next poll picks them up again.
-    newest = {s: dict(entry) for s, entry in last_seen.items()}
     ingested = 0
-    for release in new_releases:
+    for release in all_releases:
         result = await _process_release(release)
-        if result is ReleaseResult.TRANSIENT:
-            continue
-        src = release.source
-        current = newest.get(src, {"published_at": "", "release_id": ""})
-        cur_pos = (current.get("published_at", ""), current.get("release_id", ""))
-        if _pos(release) > cur_pos:
-            newest[src] = {
-                "published_at": release.published_at or "",
-                "release_id": release.release_id,
-            }
         if result is ReleaseResult.INGESTED:
             ingested += 1
-
-    if newest != last_seen:
-        async with session_scope() as session:
-            await set_state(session, STATE_KEY, {"last_seen": newest})
-
     return ingested
 
 

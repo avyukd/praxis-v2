@@ -18,7 +18,6 @@ from praxis_core.logging import configure_logging, get_logger
 from praxis_core.newswire.dedup import fetch_release_text
 from praxis_core.newswire.gnw import GNW_US_FEEDS, poll_gnw
 from praxis_core.newswire.models import PressRelease
-from praxis_core.newswire.state import get_state, set_state
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
 from praxis_core.schemas.task_types import TaskType
@@ -28,8 +27,6 @@ from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import atomic_write
 
 log = get_logger("pollers.press_us")
-
-STATE_KEY = "poller_state.press_us.last_seen"
 
 
 class ReleaseResult(Enum):
@@ -186,37 +183,20 @@ async def _process_release(release: PressRelease) -> ReleaseResult:
 
 
 async def poll_once() -> int:
-    async with session_scope() as session:
-        state = await get_state(session, STATE_KEY)
-    last_seen: dict[str, str] = dict(state.get("last_seen", {}))
-
+    """Fetch the NYSE + NASDAQ GNW feeds and run every release through
+    _process_release. Dedup is authoritative via the seen-set check in
+    _process_release (sources.dedup_key). No cursor — using a single
+    `release_id` cursor across two feeds is fragile (if GNW ever
+    assigns IDs out of strict global order, items with IDs below the
+    current cursor get silently skipped forever), and the seen-set
+    check is cheap (one Postgres SELECT per release)."""
     all_releases = await poll_gnw(GNW_US_FEEDS)
 
-    new_releases: list[PressRelease] = []
-    for r in all_releases:
-        src = r.source
-        if r.release_id <= last_seen.get(src, ""):
-            continue
-        new_releases.append(r)
-
-    # Advance cursor ONLY past terminal-state releases. Transient fetch
-    # failures stay un-advanced so next poll retries them.
-    newest = dict(last_seen)
     ingested = 0
-    for release in new_releases:
+    for release in all_releases:
         result = await _process_release(release)
-        if result is ReleaseResult.TRANSIENT:
-            continue
-        src = release.source
-        if release.release_id > newest.get(src, ""):
-            newest[src] = release.release_id
         if result is ReleaseResult.INGESTED:
             ingested += 1
-
-    if newest != last_seen:
-        async with session_scope() as session:
-            await set_state(session, STATE_KEY, {"last_seen": newest})
-
     return ingested
 
 

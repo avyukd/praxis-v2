@@ -12,3 +12,4 @@
 2026-04-20T13:36:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 158 success / 0 queued / 0 running / 50 dl — dl_recent=0 — rl clear
 2026-04-20T13:53:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 160 success / 0 running / 50 dl — rl clear — edgar re-triage bug fixed: last filing_rejected 10:46:55, zero post-restart (was 9/min pre-fix)
 2026-04-20T14:10:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 161 success / 0 running / 50 dl — filing_rejected since fix: 0 — rl clear — (separate known issue: poller missing ~43 8-Ks today due to 40-entry feed-window rollover + Fri-after-hours — awaiting user decision on fix approach)
+2026-04-20T14:28:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 211 success / 10 queued / 4 running / 50 dl — dl_recent=0 — rl clear — throughput up 20x post press-release fix (41 analyze_filing successes in 30min vs 2 before fix)
