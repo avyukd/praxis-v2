@@ -30,6 +30,13 @@ class HandlerResult(BaseModel):
     ok: bool
     llm_result: LLMResult | None = None
     message: str | None = None
+    # transient=True + ok=False tells the worker this is a cooperative
+    # "not ready, please retry later" signal — NOT a real failure. The
+    # worker will requeue the task without incrementing attempts, so
+    # it doesn't burn max_attempts and DL prematurely. Used by handlers
+    # that gate on external async conditions (e.g. synthesize_memo
+    # waiting for parallel dives to finish).
+    transient: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
 

@@ -242,6 +242,30 @@ async def execute_task(task: Task, worker_id: str) -> None:
             return
 
         if not result.ok:
+            if result.transient:
+                # Cooperative "not ready, retry later" — e.g. synthesize_memo
+                # waiting for parallel dives to finish. Release the lease and
+                # put the task back in the queue WITHOUT incrementing attempts
+                # so it doesn't burn max_attempts on legitimate async gating.
+                from praxis_core.tasks.lifecycle import release_task
+
+                await release_task(session, task.id)
+                await emit_event(
+                    "dispatcher.worker",
+                    "task_transient_retry",
+                    {
+                        "task_id": str(task.id),
+                        "type": task.type,
+                        "reason": result.message or "transient",
+                    },
+                )
+                log.info(
+                    "task.transient_retry",
+                    task_id=str(task.id),
+                    task_type=task.type,
+                    reason=(result.message or "transient")[:200],
+                )
+                return
             await _handle_failure(session, task, result.message or "handler returned ok=False")
             return
 

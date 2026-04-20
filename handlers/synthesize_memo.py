@@ -291,11 +291,14 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
             ticker=payload.ticker,
             skeleton=skeleton_specialties,
         )
+        # transient=True → worker cooperatively requeues without
+        # incrementing attempts. Previously this burned max_attempts=3
+        # and DL'd when dives took >3× the retry window.
         return HandlerResult(
             ok=False,
+            transient=True,
             message=(
-                f"dives still writing (skeleton-sized): {skeleton_specialties}; "
-                "worker will retry"
+                f"dives still writing (skeleton-sized): {skeleton_specialties}"
             ),
         )
 

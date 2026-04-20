@@ -32,3 +32,5 @@
 2026-04-20T19:12:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 356 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear
 2026-04-20T19:38:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 359 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear
 2026-04-20T19:54:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 359 success / 0 queued / 0 running / 47 dl — rl clear
+2026-04-20T20:10:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 363 success / 0 queued / 0 running / 47 dl — 30min window: analyze + orchestrate_dive + synthesize_memo + surface_ideas all firing — rl clear
+2026-04-20T20:14:00-04:00 — tier-1 — 1 DL: synthesize_memo MNPR hit dives-incomplete gate, attempts exhausted (bug in my retry path, investigating) — services-up: 6/6 — rl clear
