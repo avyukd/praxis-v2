@@ -278,27 +278,46 @@ class CLIInvoker:
 
     @staticmethod
     async def _kill_proc_tree(proc: asyncio.subprocess.Process) -> None:
-        """Kill the process group so child processes (MCP servers, tool
-        subprocs) die too. SIGTERM → 60s grace for Claude CLI to flush any
-        in-progress tool output and exit gracefully → SIGKILL if still
-        alive. The 60s grace window is deliberately long so a Write-tool
-        call that was mid-flight at SIGTERM time has a full minute to
-        complete and preserve the dive artifact on disk."""
+        """Graceful kill sequence. Verified empirically (see
+        /tmp/test_sigint*.py) that Claude CLI in `-p` / stream-json mode:
+          - on SIGINT: exits 0, emits a final `result` event (clean
+            telemetry — we capture tokens/cost); does NOT finalize any
+            in-flight tool call
+          - on SIGTERM: exits 143, truncates mid-stream, no `result`
+          - on SIGKILL: obvious
+        So: SIGINT first (15s grace) for clean telemetry, then SIGTERM
+        (15s grace) as a backup, then SIGKILL. The 60s previously allocated
+        to SIGTERM-grace wasn't buying partial-output preservation — that
+        has to come from the prompt telling the LLM to Write progressively.
+        """
         if proc.returncode is not None:
             return
         try:
             pid = proc.pid
+            # Phase 1: SIGINT — clean exit with final result event
+            try:
+                os.killpg(pid, signal.SIGINT)
+            except (ProcessLookupError, PermissionError):
+                return
+            log.info("cli.invoke.sigint_sent", pid=pid, grace_s=15)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=15)
+                log.info("cli.invoke.sigint_clean_exit", pid=pid)
+                return
+            except TimeoutError:
+                log.warning("cli.invoke.sigint_no_exit", pid=pid, action="sigterm")
+            # Phase 2: SIGTERM — process ignored SIGINT; harder shutdown
             try:
                 os.killpg(pid, signal.SIGTERM)
             except (ProcessLookupError, PermissionError):
-                proc.terminate()
-            log.info("cli.invoke.sigterm_sent", pid=pid, grace_s=60)
+                return
             try:
-                await asyncio.wait_for(proc.wait(), timeout=60)
+                await asyncio.wait_for(proc.wait(), timeout=15)
                 log.info("cli.invoke.sigterm_clean_exit", pid=pid)
                 return
             except TimeoutError:
                 log.warning("cli.invoke.sigterm_no_exit", pid=pid, action="sigkill")
+            # Phase 3: SIGKILL — unavoidable termination
             try:
                 os.killpg(pid, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):

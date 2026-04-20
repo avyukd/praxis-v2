@@ -23,6 +23,7 @@ from praxis_core.schemas.task_types import TaskModel
 from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import et_iso
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.writer import atomic_write
 
 log = get_logger("handlers.dive")
 
@@ -41,6 +42,35 @@ _PRIORITY_USD_BUDGET: dict[str, float] = {
 def dive_output_path(vault_root: Path, ticker: str, specialty_slug: str) -> Path:
     """companies/<TICKER>/dives/<specialty>.md — the D53 convention."""
     return vc.company_dir(vault_root, ticker) / "dives" / f"{specialty_slug}.md"
+
+
+def _write_skeleton(
+    output_path: Path, ticker: str, specialty_slug: str, specialty_label: str
+) -> None:
+    """Create a skeleton file before the LLM starts so that if we SIGINT
+    mid-generation (or hit timeout), there's always something on disk.
+    The LLM is instructed to Edit this file progressively as it works —
+    so partial work accumulates incrementally, and a kill anywhere loses
+    at most the last section."""
+    if output_path.exists():
+        return
+    skeleton = f"""---
+type: dive
+specialist: {specialty_slug}
+ticker: {ticker}
+data_vintage: {et_iso()[:10]}
+status: in-progress
+---
+
+# {ticker} — {specialty_label}
+
+## Verdict
+_[dive in progress — will be filled]_
+
+## Sources consulted
+_[will be populated as retrieval completes]_
+"""
+    atomic_write(output_path, skeleton)
 
 
 def _priority_from_ctx(ctx: HandlerContext) -> int:
@@ -86,6 +116,12 @@ async def run_specialist_dive(
         else None
     )
 
+    # Pre-write a skeleton so partial work is preserved across kill
+    # scenarios. The LLM is told below to Edit this in place, section by
+    # section, rather than writing everything at once at the end.
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_skeleton(output_path, ticker, specialty_slug, specialty_label)
+
     user_prompt = f"""DIVE: {specialty_label}
 
 Ticker: {ticker}
@@ -103,7 +139,9 @@ Research budget:
     exploration — run as many `get_full_statement`, `get_earnings`,
     `search_fundamentals` calls as the analysis needs)
 
-Output file (you MUST write this file atomically via the Write tool):
+Output file (a skeleton already exists at this path — use the Edit tool
+to update it progressively as you complete each section; this preserves
+partial work if the subprocess is interrupted):
   {output_path}
 
 Context sources (read what's useful — and the vault is often thin, which
@@ -123,18 +161,26 @@ Process (non-negotiable — the validator checks for proof of each step):
    Bash(curl:*) as needed. A dive that produces a "data-limited" verdict
    without retrieval evidence FAILS VALIDATION.
 
-2. **Analyze second.** Produce {output_path} with the structure defined
-   in the system prompt. Honor the word cap — better to compress than to
-   sprawl.
+2. **Edit the skeleton file progressively.** The file at {output_path}
+   already exists with section headers. Use the **Edit tool** to replace
+   each section's placeholder as you complete it, not a single Write at
+   the end. Order: retrieve some data → Edit in the "## Sources consulted"
+   row for those tool calls + Edit in a partial section → continue. If
+   the subprocess is interrupted, whatever is in the file at that moment
+   is what will be used, so keep it current.
 
-3. **Document your sources.** End the file with a `## Sources consulted`
-   section listing every tool call and its useful output. This is how the
-   validator verifies research depth.
+3. **Cover the full structure** defined in the system prompt. Honor the
+   word cap — better to compress than to sprawl.
 
-4. **Write atomically via the Write tool.** Do not overwrite existing
-   sibling dives in companies/<TICKER>/dives/ (other specialists own those).
+4. **Document your sources** in the `## Sources consulted` section at the
+   bottom. Every tool call with its outcome (e.g. "get_full_statement(...)
+   → FY2024 revenue $X"). This is how the validator verifies research
+   depth. Update this section as you go, not at the end.
 
-5. **Log in the investigation file** (if it exists): append one line to
+5. **Do not overwrite existing sibling dives** in companies/<TICKER>/dives/
+   (other specialists own those).
+
+6. **Log in the investigation file** (if it exists): append one line to
    its `## Log` section:
    `- {et_iso()}: {specialty_slug} completed ({budget.depth_label})`
 """
