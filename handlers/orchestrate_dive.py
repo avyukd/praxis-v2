@@ -14,6 +14,7 @@ from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import et_date_str, et_iso
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.coverage import find_existing_coverage
 from praxis_core.vault.writer import write_markdown_with_frontmatter
 
 log = get_logger("handlers.orchestrate_dive")
@@ -161,11 +162,30 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
         plan_text = ""
     parsed_plan = parse_plan(plan_text)
     plan_types = parsed_plan if parsed_plan else default_plan
+
+    # D24 coverage skip: if fresh themes/concepts already cover the
+    # geopolitical or macro dimensions, drop those specialists from the
+    # plan to avoid re-deriving content that's already in the vault.
+    # Never skip financial_rigorous (gating) or synthesize_memo (terminal).
+    coverage = find_existing_coverage(
+        ctx.vault_root, payload.ticker, ["geopolitical", "macro"]
+    )
+    skipped: list[str] = []
+    if coverage["geopolitical"] and TaskType.DIVE_GEOPOLITICAL_RISK in plan_types:
+        plan_types = [t for t in plan_types if t != TaskType.DIVE_GEOPOLITICAL_RISK]
+        skipped.append(
+            f"dive_geopolitical_risk (covered by {len(coverage['geopolitical'])} vault files)"
+        )
+    if coverage["macro"] and TaskType.DIVE_MACRO in plan_types:
+        plan_types = [t for t in plan_types if t != TaskType.DIVE_MACRO]
+        skipped.append(f"dive_macro (covered by {len(coverage['macro'])} vault files)")
+
     log.info(
         "orchestrate_dive.plan_resolved",
         task_id=ctx.task_id,
         parsed_count=len(parsed_plan),
         using=[t.value for t in plan_types],
+        coverage_skipped=skipped,
     )
 
     memo_handle = f"{payload.ticker.lower()}-dive-{et_date_str().replace('-', '')}"
