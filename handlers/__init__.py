@@ -68,9 +68,11 @@ def _build_registry() -> HandlerRegistry:
         notify,
         orchestrate_dive,
         rate_limit_probe,
+        refresh_backlinks,
         refresh_index,
         surface_ideas,
         synthesize_memo,
+        ticker_index,
         triage_filing,
     )
 
@@ -94,6 +96,8 @@ def _build_registry() -> HandlerRegistry:
     r.register("rate_limit_probe", rate_limit_probe.handle)
     r.register("cleanup_sessions", cleanup_sessions.handle)
     r.register("surface_ideas", surface_ideas.handle)
+    r.register("refresh_backlinks", refresh_backlinks.handle)
+    r.register("ticker_index", ticker_index.handle)
     return r
 
 

@@ -89,6 +89,32 @@ async def _enqueue_surface_ideas(session: AsyncSession) -> None:
     )
 
 
+async def _enqueue_refresh_backlinks(session: AsyncSession) -> None:
+    """Wiki connectivity refresh — rewalk the graph, update managed
+    `## Backlinks` sections on every theme/concept/people/question/
+    investigation. Pure Python, no LLM. Every 4 hours."""
+    await enqueue_task(
+        session,
+        task_type=TaskType.REFRESH_BACKLINKS,
+        payload={"triggered_by": "scheduler"},
+        priority=4,
+        dedup_key=f"refresh_backlinks:{now_et().strftime('%Y%m%d%H')}",
+    )
+
+
+async def _enqueue_ticker_index(session: AsyncSession) -> None:
+    """Orphan-ticker resolver — for every ticker with _analyzed/ data
+    but no companies/<T>/ dir, create a minimal index.md graph stub.
+    Idempotent; cheap enough to run hourly."""
+    await enqueue_task(
+        session,
+        task_type=TaskType.TICKER_INDEX,
+        payload={"triggered_by": "scheduler"},
+        priority=4,
+        dedup_key=f"ticker_index:{now_et().strftime('%Y%m%d%H')}",
+    )
+
+
 JOBS: list[CadenceJob] = [
     # Section D D39 — bumped from hourly to every 15min during market hours
     CadenceJob(name="refresh_index", interval_s=900, action=_enqueue_refresh_index),
@@ -97,6 +123,9 @@ JOBS: list[CadenceJob] = [
     CadenceJob(name="cleanup_sessions", interval_s=86400, action=_enqueue_cleanup_sessions),
     # Section D D45 — 24/7, every 30min (off-hours ideation is the point)
     CadenceJob(name="surface_ideas", interval_s=1800, action=_enqueue_surface_ideas),
+    # Wiki-connectivity refresh — graph traversal + orphan resolver
+    CadenceJob(name="refresh_backlinks", interval_s=14400, action=_enqueue_refresh_backlinks),
+    CadenceJob(name="ticker_index", interval_s=3600, action=_enqueue_ticker_index),
 ]
 
 

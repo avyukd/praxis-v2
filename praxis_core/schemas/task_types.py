@@ -25,6 +25,9 @@ class TaskType(StrEnum):
     CLEANUP_SESSIONS = "cleanup_sessions"
     # Section D idea surfacing
     SURFACE_IDEAS = "surface_ideas"
+    # Wiki connectivity maintenance (no-LLM graph traversal)
+    REFRESH_BACKLINKS = "refresh_backlinks"
+    TICKER_INDEX = "ticker_index"
 
 
 class TaskStatus(StrEnum):
@@ -64,6 +67,8 @@ MODEL_TIERS: dict[TaskType, TaskModel] = {
     TaskType.RATE_LIMIT_PROBE: TaskModel.HAIKU,
     TaskType.CLEANUP_SESSIONS: TaskModel.NONE,
     TaskType.SURFACE_IDEAS: TaskModel.SONNET,
+    TaskType.REFRESH_BACKLINKS: TaskModel.NONE,
+    TaskType.TICKER_INDEX: TaskModel.NONE,
 }
 
 
@@ -96,6 +101,9 @@ TASK_RESOURCE_KEYS: dict[TaskType, str | None] = {
     TaskType.RATE_LIMIT_PROBE: None,
     TaskType.CLEANUP_SESSIONS: "cleanup",
     TaskType.SURFACE_IDEAS: "surface_ideas",
+    # These walk the whole vault; serialize to avoid parallel full-scans.
+    TaskType.REFRESH_BACKLINKS: "wiki_mgmt",
+    TaskType.TICKER_INDEX: "wiki_mgmt",
 }
 
 

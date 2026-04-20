@@ -541,6 +541,18 @@ def validate_cleanup_sessions(payload_raw: dict[str, Any], vault_root: Path) -> 
     return ValidationResult(ok=["cleanup.completed"])
 
 
+def validate_refresh_backlinks(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    # Handler touches every theme/concept/people/question/investigation — no single
+    # artifact to check. Success is marked by the handler returning ok=True.
+    return ValidationResult(ok=["refresh_backlinks.completed"])
+
+
+def validate_ticker_index(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    # Handler creates companies/<T>/index.md for any orphan tickers. No
+    # single file to validate — success is ok=True from the handler.
+    return ValidationResult(ok=["ticker_index.completed"])
+
+
 VALIDATORS: dict[str, ValidatorFn] = {
     TaskType.TRIAGE_FILING.value: validate_triage_filing,
     TaskType.ANALYZE_FILING.value: validate_analyze_filing,
@@ -561,6 +573,8 @@ VALIDATORS: dict[str, ValidatorFn] = {
     TaskType.RATE_LIMIT_PROBE.value: validate_rate_limit_probe,
     TaskType.CLEANUP_SESSIONS.value: validate_cleanup_sessions,
     TaskType.SURFACE_IDEAS.value: validate_surface_ideas,
+    TaskType.REFRESH_BACKLINKS.value: validate_refresh_backlinks,
+    TaskType.TICKER_INDEX.value: validate_ticker_index,
 }
 
 

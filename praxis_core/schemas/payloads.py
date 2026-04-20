@@ -120,6 +120,14 @@ class RefreshIndexPayload(BaseModel):
     triggered_by: str = "scheduler"
 
 
+class RefreshBacklinksPayload(BaseModel):
+    triggered_by: str = "scheduler"
+
+
+class TickerIndexPayload(BaseModel):
+    triggered_by: str = "scheduler"
+
+
 class LintVaultPayload(BaseModel):
     triggered_by: str = "scheduler"
 

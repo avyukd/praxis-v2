@@ -26,3 +26,5 @@
 2026-04-20T17:20:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 329 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear — pipeline idle (quiet pre-close)
 2026-04-20T17:35:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 338 success / 0 queued / 1 running / 47 dl — dl_recent=0 — rl clear
 2026-04-20T17:50:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 347 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear
+2026-04-20T18:03:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 351 success / 0 queued / 2 running / 47 dl — dl_recent=0 — rl clear
+2026-04-20T18:18:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 354 success / 0 queued / 0 running / 47 dl — dl_recent=0 — rl clear
