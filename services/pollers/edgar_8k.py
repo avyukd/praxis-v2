@@ -10,6 +10,7 @@ from typing import Any
 
 import feedparser
 import httpx
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -272,8 +273,19 @@ async def _ingest_filing(filing: EdgarFiling, cik_map) -> bool:
     raw_dir = vc.raw_filing_dir(settings.vault_root, filing.form_type, filing.accession)
     filing_txt = raw_dir / "filing.txt"
     meta_json = raw_dir / "meta.json"
+    dedup_key = f"filing:{filing.accession}"
 
     if filing_txt.exists() and meta_json.exists():
+        return False
+
+    # Seen-set check: if we've ever ingested OR rejected this accession,
+    # skip. Prevents re-triaging the same filing every poll cycle (918
+    # filing_rejected events/day was the symptom before this guard).
+    async with session_scope() as session:
+        seen = (
+            await session.execute(select(Source.id).where(Source.dedup_key == dedup_key))
+        ).first()
+    if seen is not None:
         return False
 
     # Gate decisions BEFORE doing any expensive work.
@@ -281,6 +293,31 @@ async def _ingest_filing(filing: EdgarFiling, cik_map) -> bool:
         decision = await _decide_ingest(filing, session=session, cik_map=cik_map)
 
     if not decision.accept:
+        # Persist the rejection so next poll skips it (the seen-set above).
+        async with session_scope() as session:
+            stmt = (
+                insert(Source)
+                .values(
+                    dedup_key=dedup_key,
+                    source_type=(
+                        f"filing_rejected_{filing.form_type.lower().replace('-', '_')}"
+                    ),
+                    vault_path="",
+                    ticker=decision.ticker,
+                    extra={
+                        "accession": filing.accession,
+                        "form_type": filing.form_type,
+                        "cik": filing.cik,
+                        "reason": decision.reason,
+                        "items": filing.items,
+                        "market_cap_usd": decision.market_cap_usd,
+                        "rejected_at": et_iso(),
+                    },
+                )
+                .on_conflict_do_nothing(index_elements=[Source.dedup_key])
+            )
+            await session.execute(stmt)
+
         await emit_event(
             "pollers.edgar_8k",
             "filing_rejected",
