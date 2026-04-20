@@ -428,11 +428,19 @@ async def _count_autodispatched_today(session) -> int:
 async def _autodispatch_investigations(
     ideas: list[SurfacedIdea], batch_md_path: Path, vault_root: Path
 ) -> None:
-    """For each surfaced idea pinned to a clear ticker, open an
-    investigation + enqueue orchestrate_dive when the pool has spare
-    capacity. HIGH urgency dispatches up to spare_slots; MEDIUM only
-    when utilization < 50% (half the pool). Cross-ticker patterns with
-    ≤3 tickers fan out one investigation per ticker."""
+    """Treat the dispatcher like an atom splitter: keep queueing ideas
+    so workers are never idle. Priority encodes importance — HIGH ideas
+    get priority=3, MEDIUM get priority=4. Live-path events (8-K/PR
+    ingest at priority=0, user-initiated at priority=1, dive fan-out at
+    priority=2) all naturally trump surface-dispatched work.
+
+    We queue liberally — queued tasks don't tie up workers, they sit
+    until one frees. Only two gates:
+      1. Rate-limit state — if Claude is throttled, hold (would fail
+         anyway and churn rate_limit_bounces).
+      2. Daily cap (AUTODISPATCH_DAILY_CAP=20) to prevent pathological
+         runaway if the LLM surfaces many similar ideas.
+    """
     if not ideas:
         return
 
@@ -440,43 +448,36 @@ async def _autodispatch_investigations(
         cap = await get_pool_capacity(session)
         already_today = await _count_autodispatched_today(session)
 
-    if cap.at_capacity:
-        log.info(
-            "surface.autodispatch.skip_capacity",
-            running=cap.running,
-            pool_size=cap.pool_size,
-            utilization=cap.utilization,
-            rl_clear=cap.rate_limit_clear,
-        )
+    # Only hard gate is rate-limit. Capacity-based gating was removed per
+    # "treat as atom splitter — keep it running at all times." The
+    # priority queue handles ordering when HIGH work arrives.
+    if not cap.rate_limit_clear:
+        log.info("surface.autodispatch.skip_rate_limit")
         return
     if already_today >= AUTODISPATCH_DAILY_CAP:
         log.info("surface.autodispatch.skip_daily_cap", count=already_today)
         return
 
-    # Pick the set of (idea, ticker) candidates to dispatch this run.
-    candidates: list[tuple[SurfacedIdea, str]] = []
+    # Every single-or-few-ticker idea is a candidate. Both HIGH and
+    # MEDIUM queue — priority encodes the importance, not eligibility.
+    candidates: list[tuple[SurfacedIdea, str, int]] = []
     for idea in ideas:
         tickers = [t for t in (idea.tickers or []) if t and t != "UNKNOWN"]
         if not tickers or len(tickers) > 3:
             continue
-        if idea.urgency == "high":
-            for t in tickers:
-                candidates.append((idea, t))
-        elif idea.urgency == "medium" and cap.utilization < 0.5:
-            # Medium ideas only when the pool is <50% loaded
-            for t in tickers:
-                candidates.append((idea, t))
+        # priority=3 HIGH (above scheduler background), =4 MEDIUM.
+        # Live 8-K/PR path runs at 0, observer at 1, dive lane at 2.
+        prio = 3 if idea.urgency == "high" else 4
+        for t in tickers:
+            candidates.append((idea, t, prio))
 
     if not candidates:
         return
 
-    # Respect capacity (spare slots for HIGH-urgency live-path buffer)
-    # and daily cap.
-    remaining = min(cap.spare_slots, AUTODISPATCH_DAILY_CAP - already_today)
+    # Respect daily cap only.
+    remaining = AUTODISPATCH_DAILY_CAP - already_today
     candidates = candidates[: max(0, remaining)]
-
     if not candidates:
-        log.info("surface.autodispatch.no_slots", spare=cap.spare_slots)
         return
 
     # Defer imports to avoid circular / heavy imports at module load
@@ -484,7 +485,7 @@ async def _autodispatch_investigations(
 
     opened = 0
     async with session_scope() as session:
-        for idea, ticker in candidates:
+        for idea, ticker, prio in candidates:
             handle = (
                 f"{ticker.lower()}-surfaced-{now_et().strftime('%Y%m%d%H%M')}-{idea.handle[:8]}"
             )
@@ -518,7 +519,7 @@ async def _autodispatch_investigations(
                     "thesis_handle": None,
                     "research_priority": inv.research_priority,
                 },
-                priority=2,
+                priority=prio,
                 dedup_key=dedup_key,
                 investigation_id=inv.id,
             )
@@ -529,6 +530,12 @@ async def _autodispatch_investigations(
                 urgency=idea.urgency,
                 idea_type=idea.idea_type,
                 handle=handle,
+                priority=prio,
             )
 
-    log.info("surface.autodispatch.summary", opened=opened, capped_at=remaining)
+    log.info(
+        "surface.autodispatch.summary",
+        opened=opened,
+        remaining_daily=remaining,
+        pool_utilization=cap.utilization,
+    )
