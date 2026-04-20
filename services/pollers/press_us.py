@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import signal
+from enum import Enum
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
 from praxis_core.config import get_settings
@@ -31,23 +32,69 @@ log = get_logger("pollers.press_us")
 STATE_KEY = "poller_state.press_us.last_seen"
 
 
-async def _process_release(release: PressRelease) -> bool:
-    """Fetch release, apply filters, write to vault, enqueue analyze. Returns True if ingested."""
-    settings = get_settings()
-    if not release.ticker:
-        return False
+class ReleaseResult(Enum):
+    INGESTED = "ingested"
+    REJECTED = "rejected"  # terminal; persisted in sources → cursor advances past
+    TRANSIENT = "transient"  # retry next poll; cursor does NOT advance past
 
+
+async def _persist_rejection(
+    release: PressRelease, reason: str, market_cap_usd: int | None = None
+) -> None:
     dedup_key = f"pr:gnw:{release.release_id}"
+    async with session_scope() as session:
+        stmt = (
+            insert(Source)
+            .values(
+                dedup_key=dedup_key,
+                source_type=f"press_release_rejected_{release.source}",
+                vault_path="",
+                ticker=release.ticker or None,
+                extra={
+                    "release_id": release.release_id,
+                    "ticker": release.ticker,
+                    "exchange": release.exchange,
+                    "title": release.title,
+                    "url": release.url,
+                    "source": release.source,
+                    "reason": reason,
+                    "market_cap_usd": market_cap_usd,
+                    "rejected_at": et_iso(),
+                },
+            )
+            .on_conflict_do_nothing(index_elements=[Source.dedup_key])
+        )
+        await session.execute(stmt)
+
+
+async def _process_release(release: PressRelease) -> ReleaseResult:
+    """Fetch release, apply filters, write to vault, enqueue analyze."""
+    settings = get_settings()
+    dedup_key = f"pr:gnw:{release.release_id}"
+
+    # Seen-set: if already processed, skip.
+    async with session_scope() as session:
+        seen = (
+            await session.execute(select(Source.id).where(Source.dedup_key == dedup_key))
+        ).first()
+    if seen is not None:
+        return ReleaseResult.REJECTED
+
+    if not release.ticker:
+        await _persist_rejection(release, reason="no_ticker")
+        return ReleaseResult.REJECTED
+
     raw_dir = vc.raw_pr_dir(settings.vault_root, release.source, release.ticker, release.release_id)
     release_txt = raw_dir / "release.txt"
     index_json = raw_dir / "index.json"
-    if release_txt.exists() and index_json.exists():
-        return False
 
     async with session_scope() as session:
         lookup = await fetch_market_cap_usd(session, release.ticker)
     mcap = lookup.market_cap_usd
     if not passes_mcap_filter(mcap, settings.market_cap_max_usd, keep_unknown=True):
+        await _persist_rejection(
+            release, reason=f"mcap ${mcap:,} > cap", market_cap_usd=mcap
+        )
         await emit_event(
             "pollers.press_us",
             "release_rejected",
@@ -58,7 +105,7 @@ async def _process_release(release: PressRelease) -> bool:
                 "market_cap_usd": mcap,
             },
         )
-        return False
+        return ReleaseResult.REJECTED
 
     try:
         text = await fetch_release_text(release.url, release.source)
@@ -69,10 +116,11 @@ async def _process_release(release: PressRelease) -> bool:
             ticker=release.ticker,
             error=str(e),
         )
-        return False
+        return ReleaseResult.TRANSIENT
 
     if not text.strip():
-        return False
+        await _persist_rejection(release, reason="empty_body")
+        return ReleaseResult.REJECTED
 
     atomic_write(release_txt, text)
     meta = {
@@ -134,11 +182,7 @@ async def _process_release(release: PressRelease) -> bool:
         release_id=release.release_id,
         ticker=release.ticker,
     )
-    return True
-
-
-def _dedup_content_hash(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return ReleaseResult.INGESTED
 
 
 async def poll_once() -> int:
@@ -149,23 +193,30 @@ async def poll_once() -> int:
     all_releases = await poll_gnw(GNW_US_FEEDS)
 
     new_releases: list[PressRelease] = []
-    newest = dict(last_seen)
     for r in all_releases:
         src = r.source
         if r.release_id <= last_seen.get(src, ""):
             continue
         new_releases.append(r)
-        if r.release_id > newest.get(src, ""):
-            newest[src] = r.release_id
+
+    # Advance cursor ONLY past terminal-state releases. Transient fetch
+    # failures stay un-advanced so next poll retries them.
+    newest = dict(last_seen)
+    ingested = 0
+    for release in new_releases:
+        result = await _process_release(release)
+        if result is ReleaseResult.TRANSIENT:
+            continue
+        src = release.source
+        if release.release_id > newest.get(src, ""):
+            newest[src] = release.release_id
+        if result is ReleaseResult.INGESTED:
+            ingested += 1
 
     if newest != last_seen:
         async with session_scope() as session:
             await set_state(session, STATE_KEY, {"last_seen": newest})
 
-    ingested = 0
-    for release in new_releases:
-        if await _process_release(release):
-            ingested += 1
     return ingested
 
 

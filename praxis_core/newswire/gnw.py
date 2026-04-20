@@ -22,8 +22,11 @@ GNW_US_FEEDS = [
 ]
 
 GNW_CA_FEEDS = [
-    "https://www.globenewswire.com/RssFeed/exchange/TSX",
-    "https://www.globenewswire.com/RssFeed/exchange/TSXV",
+    # GlobeNewswire's /exchange/TSX and /exchange/TSXV feeds return 0 items
+    # (empty <channel>) despite returning HTTP 200. The country-level feed
+    # is the working one; ticker+exchange are parsed from <category>
+    # stock-tags per release.
+    "https://www.globenewswire.com/RssFeed/country/Canada",
 ]
 
 _TICKER_PAREN_RE = re.compile(
