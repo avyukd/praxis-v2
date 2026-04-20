@@ -1136,7 +1136,7 @@ behavior unless explicitly flagged otherwise."
 - [ ] New task types + payloads + validators
 - [ ] Alembic migrations
 - [ ] `ResearchBudget` ported
-- [ ] `find_existing_coverage` helper
+- [x] `find_existing_coverage` helper
 - [x] Fundamentals MCP server + tools
 - [x] Fundamentals MCP cache
 - [x] Fundamentals MCP tests (unit + integration-live-gated)
