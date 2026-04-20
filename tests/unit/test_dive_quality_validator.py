@@ -82,13 +82,15 @@ def test_research_depth_rejects_missing_sources_section():
 def test_research_depth_rejects_reward_hack_body():
     content = _reward_hack_body("financial-rigorous")
     issues = _check_research_depth("/x/dive.md", content)
-    # Either missing sources section OR insufficient retrieval — at least one
-    assert issues
-    msgs = " ".join(i.reason for i in issues)
-    assert "Sources consulted" in msgs or "insufficient" in msgs
+    # Reward-hack body is rejected on multiple fronts: no Sources section,
+    # no fundamentals calls, no web retrieval, data-gap spam.
+    assert len(issues) >= 3
 
 
-def test_research_depth_counts_wikilinks_as_retrieval():
+def test_research_depth_wikilinks_alone_no_longer_pass():
+    # Pre-tightening: 3 wikilinks satisfied the retrieval threshold.
+    # Post-tightening: wikilinks alone are insufficient — need
+    # fundamentals MCP + web retrieval as primary evidence.
     content = (
         "body\n\n"
         "[[_raw/filings/10-k/abc/filing.txt]]\n"
@@ -98,7 +100,25 @@ def test_research_depth_counts_wikilinks_as_retrieval():
         "- primary filings cited via wikilinks above\n"
     )
     issues = _check_research_depth("/x/dive.md", content)
-    assert issues == []
+    assert issues
+    msgs = " ".join(i.reason for i in issues)
+    assert "fundamentals" in msgs
+    assert "web retrieval" in msgs
+
+
+def test_research_depth_rejects_too_many_data_gap_phrases():
+    content = (
+        "body\n"
+        "`mcp__fundamentals__company_overview(X)` returned marketCap=X\n"
+        "`mcp__fundamentals__get_price(X)` returned null\n"
+        "`WebFetch(https://sec.gov/...)` succeeded\n"
+        "## Some section\nNot evaluable. Not evaluable. Cannot assess. "
+        "Cannot assess. Data gap. Data gap. Data unavailable.\n"
+        "## Sources consulted\n"
+        "- tools above\n"
+    )
+    issues = _check_research_depth("/x/dive.md", content)
+    assert any("reward-hack pattern" in i.reason for i in issues)
 
 
 # -- word budget --

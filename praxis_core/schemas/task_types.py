@@ -70,16 +70,25 @@ MODEL_TIERS: dict[TaskType, TaskModel] = {
 TASK_RESOURCE_KEYS: dict[TaskType, str | None] = {
     TaskType.TRIAGE_FILING: None,
     TaskType.ANALYZE_FILING: None,
+    # compile_to_wiki needs exclusive access to notes.md — serialize per ticker.
     TaskType.COMPILE_TO_WIKI: "company",
     TaskType.NOTIFY: None,
+    # One orchestrator per investigation; the dive plan fan-out runs concurrently.
     TaskType.ORCHESTRATE_DIVE: "investigation",
-    TaskType.DIVE_FINANCIAL_RIGOROUS: "company",
-    TaskType.DIVE_BUSINESS_MOAT: "company",
-    TaskType.DIVE_INDUSTRY_STRUCTURE: "company",
-    TaskType.DIVE_CAPITAL_ALLOCATION: "company",
-    TaskType.DIVE_GEOPOLITICAL_RISK: "company",
-    TaskType.DIVE_MACRO: "company",
-    TaskType.DIVE_CUSTOM: "company",
+    # Dives write to per-specialty files (companies/<T>/dives/<specialty>.md) —
+    # no shared-state conflict. Parallel execution means the full dive chain
+    # finishes in ~15min wall instead of ~60min serial, and each specialist
+    # can't crib from peer verdicts (breaks echo chamber, forces independent
+    # retrieval + analysis per specialty).
+    TaskType.DIVE_FINANCIAL_RIGOROUS: None,
+    TaskType.DIVE_BUSINESS_MOAT: None,
+    TaskType.DIVE_INDUSTRY_STRUCTURE: None,
+    TaskType.DIVE_CAPITAL_ALLOCATION: None,
+    TaskType.DIVE_GEOPOLITICAL_RISK: None,
+    TaskType.DIVE_MACRO: None,
+    TaskType.DIVE_CUSTOM: None,
+    # synthesize_memo reads all dives + writes a single memo — needs to wait
+    # for dives and hold exclusive ticker-state while writing.
     TaskType.SYNTHESIZE_MEMO: "company",
     TaskType.REFRESH_INDEX: "index",
     TaskType.LINT_VAULT: "lint",

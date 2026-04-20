@@ -274,13 +274,33 @@ _WEB_RETRIEVAL_RE = re.compile(
 )
 _WIKILINK_CITATION_RE = re.compile(r"\[\[_raw/[^\]]+\]\]|\[\[_analyzed/[^\]]+\]\]")
 _SOURCES_CONSULTED_RE = re.compile(r"^##\s+Sources consulted\b", re.MULTILINE | re.IGNORECASE)
+# Reward-hack sentinels — phrases that appear when the dive gives up
+# without actually attempting retrieval. A single occurrence with proof
+# of retrieval (e.g. "yfinance returned null for X") is fine; several
+# in a row is the tell.
+_REWARD_HACK_PHRASES_RE = re.compile(
+    r"(?:not evaluable|cannot assess|data gap|data-limited|"
+    r"data unavailable|not producible|not ingested|not in the vault)",
+    re.IGNORECASE,
+)
 
 
 def _check_research_depth(
     path_str: str, content: str
 ) -> list[ValidationMalformed]:
-    """Enforce dive-quality contract: required Sources section + proof of
-    primary-source retrieval. Returns list of malformed entries (empty if OK)."""
+    """Enforce dive-quality contract:
+      - ## Sources consulted section required
+      - >=2 distinct mcp__fundamentals__ tool markers (MANDATORY — dives
+        must call the fundamentals MCP; vault wikilinks alone are not
+        evidence of fresh research)
+      - >=1 distinct web-retrieval marker (WebFetch/WebSearch/curl URL) —
+        proves the dive pulled at least one primary source
+      - no more than 3 "unknown / data gap / not evaluable" sentinels — a
+        handful is fine when legitimately a datapoint was unavailable;
+        spamming them is reward hacking
+    Vault wikilinks are still encouraged as supplementary citation but
+    no longer count toward the retrieval threshold on their own.
+    """
     issues: list[ValidationMalformed] = []
     if not _SOURCES_CONSULTED_RE.search(content):
         issues.append(
@@ -292,16 +312,50 @@ def _check_research_depth(
     fundamentals_hits = len(set(_FUNDAMENTALS_TOOL_RE.findall(content)))
     web_hits = len(set(_WEB_RETRIEVAL_RE.findall(content)))
     wikilink_hits = len(set(_WIKILINK_CITATION_RE.findall(content)))
-    # Require at least 3 retrieval markers from ANY combination of fundamentals
-    # MCP, web fetches, or vault wikilinks. Most dives should easily exceed.
-    if fundamentals_hits + web_hits + wikilink_hits < 3:
+    if fundamentals_hits < 2:
         issues.append(
             ValidationMalformed(
                 path=path_str,
                 reason=(
-                    f"insufficient research evidence: {fundamentals_hits} "
-                    f"fundamentals-MCP + {web_hits} web + {wikilink_hits} "
-                    "_raw/_analyzed citations (need >=3 total)"
+                    f"need >=2 distinct mcp__fundamentals__ calls "
+                    f"(found {fundamentals_hits}); vault wikilinks alone "
+                    "are not fresh research"
+                ),
+            )
+        )
+    if web_hits < 1:
+        issues.append(
+            ValidationMalformed(
+                path=path_str,
+                reason=(
+                    f"need >=1 web retrieval (WebFetch/WebSearch/curl/URL) "
+                    f"— found {web_hits}; primary-source fetch is mandatory"
+                ),
+            )
+        )
+    # Supplementary wikilink citation is still expected but not a hard
+    # fail if absent — some specialties (pure macro) legitimately have
+    # no vault citations yet.
+    if wikilink_hits == 0 and fundamentals_hits + web_hits < 4:
+        issues.append(
+            ValidationMalformed(
+                path=path_str,
+                reason=(
+                    "no _raw/ or _analyzed/ wikilinks AND <4 tool calls "
+                    "— dive does not cite any vault data and has thin tool use"
+                ),
+            )
+        )
+    # Reward-hack phrase count
+    hack_hits = len(_REWARD_HACK_PHRASES_RE.findall(content))
+    if hack_hits > 3:
+        issues.append(
+            ValidationMalformed(
+                path=path_str,
+                reason=(
+                    f"{hack_hits} 'data gap / not evaluable / cannot assess' "
+                    "phrases — reward-hack pattern; if the data is actually "
+                    "missing, derive from alternatives or fetch elsewhere"
                 ),
             )
         )

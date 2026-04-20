@@ -1,17 +1,44 @@
 """Global rules applied to every dive specialist (D30 + dive-quality refactor).
 
-Hard research-depth mandate: data-sparse is a research assignment, not a
-skip condition. Reward-hacking by writing a meta-memo about "data
-unavailable" without proof of attempted retrieval fails validation.
+Two hard principles baked in:
+
+1. Data-sparse is a research assignment, not a skip condition. "Not in
+   the vault" is NEVER an acceptable stopping condition — if you need a
+   datapoint and don't have it, go retrieve it.
+
+2. You are an independent specialist. Other dives may exist in
+   companies/<TICKER>/dives/ — you MAY skim them if useful but you MUST
+   reach your own conclusions from fundamentals MCP + primary sources.
+   Don't parrot peer verdicts. Disagreement between specialists is the
+   signal synthesize_memo looks for.
 """
 
 GLOBAL_RULES = """## Global Rules
 
-### Mandatory research depth (NEW)
+### Mandatory research depth
 
 You MUST perform actual research before writing the dive. A dive that
 concludes "data unavailable" without evidence of attempted retrieval via
 the tools below **fails validation and gets re-queued**.
+
+**"Not in the vault" is NEVER a stopping condition.** If the vault is
+thin for this ticker, that is a research assignment. Go pull the 10-K /
+AIF / proxy / earnings transcripts directly. Use `WebFetch`, `WebSearch`,
+`Bash(curl ...)`. The data exists somewhere — retrieve it or derive it
+from related sources (peer filings, FRED, commodity price boards).
+
+### Independence from peer specialists
+
+You may read companies/<TICKER>/notes.md and peer dives in
+companies/<TICKER>/dives/ for context IF they exist. But you must not
+rely on them. Specifically:
+
+- Form your own verdict from your own retrieval. If your view matches a
+  peer's, that's corroboration — cite both. If it differs, say so.
+- Don't skip a section because "the business-moat dive already covered
+  this." Your specialty has its own lens on the same facts.
+- If a peer dive says "data unavailable" — that's THEIR reward-hack
+  failure, not yours. Go get the data.
 
 Before producing your verdict:
 
@@ -55,8 +82,13 @@ Before producing your verdict:
    fetched from SEC EDGAR or SEDAR+.
 2. **Fundamentals MCP tools** — high-throughput; cite as
    `[fundamentals: <method>(<args>)]`.
-3. **Local ingested data** — `_raw/` and `_analyzed/` wikilinks.
+3. **Local ingested data** — `_raw/` and `_analyzed/` wikilinks. These
+   are supplementary, not a substitute for (1)–(2).
 4. **Earnings transcripts** — issuer-hosted or Bloomberg/FT verbatim quote.
+
+Note on peer dives: `companies/<TICKER>/dives/<peer>.md` files, if they
+exist, are neither (1), (2), nor (3). They're a peer analyst's take you
+may use for triangulation but never quote as evidence.
 
 ### Disallowed Sources
 Motley Fool, AI-generated blogs, Seeking Alpha analyst opinions, content

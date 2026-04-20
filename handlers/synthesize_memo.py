@@ -133,11 +133,34 @@ SYSTEM_PROMPT = (
     + """
 Task: synthesize_memo
 
-Produce a dated memo crystallizing the current state of research for this ticker.
-Structure (required):
-  frontmatter: type=memo, ticker, decision (Buy|Sell|Neutral|Too Hard), data_vintage, links
+You are the coordinator. The specialist dives ran INDEPENDENTLY from each
+other — they did not share context, so their conclusions are genuinely
+independent reads on the same company. Your job is to cross-check them
+and produce a decisive memo.
+
+## Cross-check first, synthesize second
+
+Before writing the memo sections below, read every existing dive under
+`companies/<TICKER>/dives/*.md`. Explicitly look for:
+
+- **Corroboration**: where do independent specialists converge? (strong
+  signal — this is your conviction base)
+- **Disagreement**: where do they diverge? (this is the research gap you
+  must resolve — go to primary filings, re-derive)
+- **Silence**: what's NOT covered by any specialist? (usually where the
+  gap is biggest — explicitly name it)
+
+The `## Dive cross-check` section in the memo must surface all three.
+
+## Memo structure (required)
+
+  frontmatter: type=memo, ticker, decision (Buy|Sell|Neutral|Too Hard),
+               data_vintage, links
   ## Thesis                (1-2 sentence variant perception)
   ## What's new            (the catalyst that triggered this memo)
+  ## Dive cross-check      (NEW — explicit agreement/disagreement table
+                            across specialists; resolve disagreements
+                            via primary filings, don't punt)
   ## Business overview
   ## Financial analysis    (tables with sourced numbers)
   ## Competitive position
@@ -147,7 +170,9 @@ Structure (required):
   ## Confidence & gaps
   ## Related               (wikilinks, bidirectional)
 
-Decision hygiene: "Too Hard" and "Neutral" are valid. Don't force conviction.
+Decision hygiene: "Too Hard" and "Neutral" are valid. Don't force
+conviction. If the dives genuinely disagree after you've gone to primary
+sources, "Too Hard" is the honest answer.
 
 Memo path: <vault>/companies/<TICKER>/memos/<YYYY-MM-DD>-<memo_handle>.md
 """
