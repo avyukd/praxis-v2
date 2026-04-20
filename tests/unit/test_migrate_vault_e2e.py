@@ -95,7 +95,10 @@ def test_apply_executes_migration(tmp_path: Path) -> None:
     # Dropped files should NOT exist
     assert not (target / "00_inbox/capture.md").exists()
     assert not (target / "90_meta/agenda.md").exists()
-    assert not (target / "INDEX.md").exists()
+    # D55: source INDEX.md is dropped but target gets a fresh one from
+    # vault_seed/INDEX.md on migration apply — verify it's the seed version
+    assert (target / "INDEX.md").exists()
+    assert "drop me" not in (target / "INDEX.md").read_text()
 
     # Wikilinks should be rewritten
     notes_text = (target / "companies/NVDA/notes.md").read_text()

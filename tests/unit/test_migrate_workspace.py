@@ -76,8 +76,8 @@ def test_migrate_workspace_full(tmp_path: Path) -> None:
 
     # Check file placements
     assert (target / "companies/ACHV/memos/2026-04-16-memo.md").exists()
-    assert (target / "companies/NVDA/analyst_reports/rigorous-financial.md").exists()
-    assert (target / "companies/NVDA/analyst_reports/business-moat.md").exists()
+    assert (target / "companies/NVDA/dives/financial-rigorous.md").exists()
+    assert (target / "companies/NVDA/dives/business-moat.md").exists()
     assert (target / "companies/AAPL/journal.md").exists()
     assert (target / "companies/NVDA/data/fundamentals/summary.md").exists()
     assert (target / "memos/macro").exists()
