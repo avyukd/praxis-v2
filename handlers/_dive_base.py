@@ -93,10 +93,15 @@ Investigation: {investigation_handle or "(standalone)"}
 Specialty: {specialty_slug}
 Research depth: **{budget.depth_label}**
 
-Research budget (respect these limits):
-  - Word cap for this dive: ~{budget.specialist_words} words
-  - Web lookups allowed: {budget.web_lookups}
-  - Tool-call policy: {budget.agent_policy}
+Research budget:
+  - Word cap for this dive: ~{budget.specialist_words} words (controls
+    output size; keep the dive tight and table-heavy)
+  - Web lookups: unlimited — fetch every primary source you need. SEC
+    filings, SEDAR+ filings, issuer IR pages, FRED, competitor 10-Ks,
+    earnings transcripts, whatever it takes. Do not stop early.
+  - Tool-call policy: {budget.agent_policy} (depth of fundamentals-MCP
+    exploration — run as many `get_full_statement`, `get_earnings`,
+    `search_fundamentals` calls as the analysis needs)
 
 Output file (you MUST write this file atomically via the Write tool):
   {output_path}

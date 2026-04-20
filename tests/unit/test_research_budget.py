@@ -17,6 +17,12 @@ def test_budget_tiers() -> None:
     assert b.web_lookups == "unlimited"
 
 
+def test_all_tiers_uncapped_web_lookups() -> None:
+    # Web lookup caps were counterproductive — all tiers now unlimited.
+    for p in range(11):
+        assert ResearchBudget.from_priority(p).web_lookups == "unlimited"
+
+
 def test_budget_clamps() -> None:
     assert ResearchBudget.from_priority(-5).agent_policy == "minimal"
     assert ResearchBudget.from_priority(99).agent_policy == "maximum"
