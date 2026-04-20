@@ -23,6 +23,7 @@ from praxis_core.tasks.lifecycle import (
     requeue_on_rate_limit,
 )
 from praxis_core.tasks.validators import get_validator
+from services.dispatcher.investability import handle_post_dive_investability
 
 log = get_logger("dispatcher.worker")
 
@@ -264,6 +265,15 @@ async def execute_task(task: Task, worker_id: str) -> None:
             await rate_limiter.reset_consecutive_hits(session)
             if task.type == TaskType.RATE_LIMIT_PROBE.value:
                 await rate_limiter.probe_succeeded(session)
+            if task.type == TaskType.DIVE_FINANCIAL_RIGOROUS.value:
+                try:
+                    await handle_post_dive_investability(
+                        session, task, settings.vault_root
+                    )
+                except Exception as e:
+                    log.warning(
+                        "investability.hook_fail", task_id=str(task.id), error=str(e)
+                    )
             return
 
         if validation.is_partial:

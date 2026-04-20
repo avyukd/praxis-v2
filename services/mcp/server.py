@@ -364,6 +364,111 @@ async def cancel_investigation(
 
 
 @mcp.tool()
+async def override_investability(
+    investigation_handle: str,
+    decision: str,
+    note: str,
+) -> dict[str, Any]:
+    """Override the INVESTABILITY gate for an investigation (D20).
+
+    decision='CONTINUE': re-enqueue any sibling dives that were canceled
+    by an earlier investability_stop (status='canceled' with last_error
+    starting 'investability_stop:'). Resets investigation to active.
+
+    decision='STOP': cancel all queued/running dives for this
+    investigation immediately (same semantics as cancel_investigation
+    cascade=True, but leaves investigation status 'active' so synthesize_memo
+    can still fire a "Too Hard" memo).
+
+    Appends an auditable entry to investigations/<handle>.md and emits
+    investability_overridden event.
+    """
+    from sqlalchemy import update
+
+    from praxis_core.time_et import now_utc
+
+    d = decision.upper().strip()
+    if d not in ("CONTINUE", "STOP"):
+        return {"ok": False, "error": f"decision must be CONTINUE or STOP, got {decision!r}"}
+
+    async with session_scope() as session:
+        inv = (
+            await session.execute(
+                select(Investigation).where(Investigation.handle == investigation_handle)
+            )
+        ).scalar_one_or_none()
+        if inv is None:
+            return {"ok": False, "error": "investigation not found"}
+
+        affected = 0
+        if d == "CONTINUE":
+            stmt = (
+                update(Task)
+                .where(Task.investigation_id == inv.id)
+                .where(Task.status == "canceled")
+                .where(Task.last_error.like("investability_stop:%"))
+                .values(
+                    status="queued",
+                    finished_at=None,
+                    last_error=f"investability_overridden_continue: {note[:400]}",
+                )
+                .returning(Task.id)
+            )
+            result = await session.execute(stmt)
+            affected = len(list(result.scalars().all()))
+            inv.status = "active"
+        else:  # STOP
+            stmt = (
+                update(Task)
+                .where(Task.investigation_id == inv.id)
+                .where(Task.status.in_(("queued", "running")))
+                .where(Task.type.like("dive_%"))
+                .values(
+                    status="canceled",
+                    finished_at=now_utc(),
+                    lease_holder=None,
+                    lease_expires_at=None,
+                    last_error=f"investability_overridden_stop: {note[:400]}",
+                )
+                .returning(Task.id)
+            )
+            result = await session.execute(stmt)
+            affected = len(list(result.scalars().all()))
+
+        settings = get_settings()
+        inv_path = vc.investigation_path(settings.vault_root, investigation_handle)
+        try:
+            existing = inv_path.read_text(encoding="utf-8") if inv_path.exists() else ""
+            override_block = (
+                f"\n\n## Human override\n\n"
+                f"- {et_iso()} — decision: {d} — by: observer\n"
+                f"  - note: {note}\n"
+                f"  - affected tasks: {affected}\n"
+            )
+            atomic_write(inv_path, existing + override_block)
+        except OSError as e:
+            log.warning("override_investability.inv_write_fail", error=str(e))
+
+        await emit_event(
+            "mcp.server",
+            "investability_overridden",
+            {
+                "handle": investigation_handle,
+                "decision": d,
+                "note": note[:500],
+                "affected_tasks": affected,
+            },
+        )
+
+    return {
+        "ok": True,
+        "handle": investigation_handle,
+        "decision": d,
+        "affected_tasks": affected,
+    }
+
+
+@mcp.tool()
 async def list_investigations(
     status: str | None = None,
     limit: int = 50,

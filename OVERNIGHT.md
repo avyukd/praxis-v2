@@ -1163,8 +1163,8 @@ behavior unless explicitly flagged otherwise."
 - [ ] `dive_custom` handler
 - [ ] Orchestrator rewrite (wiki crawl + coverage + expanded plan)
 - [ ] Plan parser extension (dive_custom multi-line)
-- [ ] Worker INVESTABILITY detection + sibling cancel
-- [ ] `override_investability` MCP tool
+- [x] Worker INVESTABILITY detection + sibling cancel
+- [x] `override_investability` MCP tool
 - [ ] synthesize_memo quality gates
 - [ ] Tests green (specialist validators, plan parser, coverage, worker
       logic, override, synthesize gates)

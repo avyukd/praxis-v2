@@ -9,3 +9,4 @@
 2026-04-20T12:49:00-04:00 — tier-0 — no red signals (F1/F2 RESOLVED by watchdog fix) — services-up: 6/6 — tasks: 153 success / 0 queued / 0 running / 50 dl (dl_recent=2 are my manual incident DLs, not real) — no watchdog kills since 09:41 — rl clear — system quiet/idle
 2026-04-20T13:03:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 156 success / 0 queued / 0 running / 50 dl (dl_recent=2 still my incident DLs, aging out soon) — no watchdog kills in last 15min — rl clear
 2026-04-20T13:20:00-04:00 — tier-0 — no red signals (dl_recent now 0, incident DLs aged out) — services-up: 6/6 — tasks: 157 success / 0 queued / 0 running / 50 dl — rl clear — no watchdog kills
+2026-04-20T13:36:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 158 success / 0 queued / 0 running / 50 dl — dl_recent=0 — rl clear
