@@ -2087,7 +2087,7 @@ just use it in surface_ideas.
 - [x] surface_ideas handler + prompt + validator + anomaly cap
 - [x] surfaced_ideas dedup logic
 - [x] Cross-reference logic: append to themes/concepts referenced by ideas
-- [ ] MCP tools (list_surfaced_ideas, surface_ideas_now)
+- [x] MCP tools (list_surfaced_ideas, surface_ideas_now)
 - [x] Scheduler: surface 24/7 cadence, refresh_index bump, LOG rotation,
       morning digest
 - [ ] Unit tests (dedup, backup, section_append, validator changes)
@@ -2872,12 +2872,12 @@ tests run once per Section commit as part of that section's own CI.
 
 - [x] D62-D67 decisions locked in
 - [ ] Open items OF1-OF3 resolved (leaning defaults proposed)
-- [ ] `docs/audit-prompt.md` written (D64 prompt)
-- [ ] `AUDIT_FINDINGS.md` + `AUDIT_LOG.md` initialized
-- [ ] Cron scheduled
-- [ ] First manual iteration verified sane
-- [ ] Loop runs through Section A-E implementation
-- [ ] Termination criterion met → self-delete
+- [x] `docs/audit-prompt.md` written (D64 prompt)
+- [x] `AUDIT_FINDINGS.md` + `AUDIT_LOG.md` initialized
+- [x] Cron scheduled
+- [x] First manual iteration verified sane
+- [x] Loop runs through Section A-E implementation
+- [x] Termination criterion met → self-delete (fired iter 6, 3 consecutive clean)
 - [ ] Final `AUDIT_FINDINGS.md` reviewed by Avyuk (may trigger cleanup
       work)
 
@@ -2961,13 +2961,13 @@ code or checked-in config.
 | Tailscale auth | Cross-host connectivity | `tailscale up --authkey=...` |
 
 **Pre-deploy checklist** that must complete before services start:
-- [ ] Postgres up, role+DB created, `alembic upgrade head` succeeds
-- [ ] `.env` populated with all of the above
-- [ ] `claude` CLI logged in with Max subscription (interactive, one-
+- [x] Postgres up, role+DB created, `alembic upgrade head` succeeds
+- [x] `.env` populated with all of the above
+- [x] `claude` CLI logged in with Max subscription (interactive, one-
       time; run `claude` once and follow prompts)
 - [ ] ntfy topics subscribed on phone (install ntfy app, subscribe to
       both signal + alert topics)
-- [ ] SEC_USER_AGENT contains a real email per SEC policy
+- [x] SEC_USER_AGENT contains a real email per SEC policy
 - [ ] Tailscale up if using Tailscale-routed MCP/dashboard
 
 ### D71. systemd units (Track 1 — Ryzen)
@@ -3339,9 +3339,9 @@ Implications for the install sequence:
 - [ ] OG4 confirmed — 05:00 ET first firing
 - [ ] OG5 tuned — disk threshold
 - [x] OG6 resolved — fade backups for now; no restic/S3 setup
-- [ ] `.env` populated per D70
-- [ ] Postgres + alembic per D69
-- [ ] Claude CLI logged in on deploy host
+- [x] `.env` populated per D70
+- [x] Postgres + alembic per D69
+- [x] Claude CLI logged in on deploy host
 - [ ] ntfy topics subscribed on phone
 - [ ] `scripts/preflight.sh` written + green
 - [ ] `scripts/smoke.sh` extended for D73 sequence
@@ -3352,7 +3352,7 @@ Implications for the install sequence:
 - [ ] D73 smoke sequence executed + all checkpoints green
 - [ ] `docs/observability-prompt.md` written
 - [ ] Observability loop scheduled per D74
-- [ ] First manual iteration verified sane
+- [x] First manual iteration verified sane
 - [ ] Commit (infra unit files, scripts, prompts)
 
 ---

@@ -121,6 +121,75 @@ async def list_recent_analyses(hours: int = 24, limit: int = 50) -> list[dict[st
 
 
 @mcp.tool()
+async def list_surfaced_ideas(
+    hours: int = 24,
+    limit: int = 50,
+    urgency: str | None = None,
+) -> list[dict[str, Any]]:
+    """Recent idea-surfacer output from the surfaced_ideas table.
+
+    Each row is one pattern the system flagged — cross-ticker setups,
+    thesis conflicts, anomalies, etc. Pair with auto-dispatch:
+    surface_ideas auto-opens an investigation for HIGH single-ticker
+    ideas, so a row here with urgency=high usually has an
+    investigation already running.
+
+    Args:
+      hours: look back window (default 24)
+      limit: max rows returned
+      urgency: filter to one of "high" | "medium" | "low" if set
+    """
+    from sqlalchemy import text as sql_text
+
+    since = now_utc() - timedelta(hours=hours)
+    params: dict[str, Any] = {"since": since, "limit": limit}
+    where = ["surfaced_at >= :since"]
+    if urgency:
+        where.append("urgency = :urgency")
+        params["urgency"] = urgency
+    q = (
+        "SELECT id, handle, idea_type, urgency, summary, tickers, themes, "
+        "surfaced_at, notified "
+        "FROM surfaced_ideas WHERE " + " AND ".join(where) +
+        " ORDER BY surfaced_at DESC LIMIT :limit"
+    )
+    async with session_scope() as session:
+        rows = (await session.execute(sql_text(q), params)).mappings().all()
+    return [
+        {
+            "id": str(r["id"]),
+            "handle": r["handle"],
+            "idea_type": r["idea_type"],
+            "urgency": r["urgency"],
+            "tickers": list(r["tickers"] or []),
+            "themes": list(r["themes"] or []),
+            "summary": r["summary"],
+            "surfaced_at": r["surfaced_at"].isoformat() if r["surfaced_at"] else None,
+            "notified": bool(r["notified"]),
+        }
+        for r in rows
+    ]
+
+
+@mcp.tool()
+async def surface_ideas_now() -> dict[str, Any]:
+    """Manually trigger a surface_ideas run outside the normal 15-min
+    schedule. Useful after a major news event or when you want to
+    force the analyst to re-scan the recent-analyses corpus. Enqueues
+    a surface_ideas task at priority 1 (observer-initiated) so it jumps
+    ahead of the scheduled runs and auto-dispatched investigations."""
+    async with session_scope() as session:
+        tid = await enqueue_task(
+            session,
+            task_type=TaskType.SURFACE_IDEAS,
+            payload={"triggered_by": "observer", "manual": True},
+            priority=1,
+            dedup_key=f"surface_ideas:manual:{now_et().strftime('%Y%m%d%H%M')}",
+        )
+    return {"ok": True, "task_id": str(tid)}
+
+
+@mcp.tool()
 async def list_fired_signals(hours: int = 24, limit: int = 50) -> list[dict[str, Any]]:
     since = now_utc() - timedelta(hours=hours)
     async with session_scope() as session:

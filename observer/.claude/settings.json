@@ -23,6 +23,8 @@
       "mcp__praxis__search_vault",
       "mcp__praxis__list_recent_analyses",
       "mcp__praxis__list_fired_signals",
+      "mcp__praxis__list_surfaced_ideas",
+      "mcp__praxis__surface_ideas_now",
       "mcp__praxis__list_tasks",
       "mcp__praxis__list_investigations",
       "mcp__praxis__list_dead_letters",
