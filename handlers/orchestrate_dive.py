@@ -25,21 +25,63 @@ SYSTEM_PROMPT = (
     + """
 Task: orchestrate_dive
 
-You are planning a multi-task deep dive on a company. Given the current state of the wiki
-for this ticker, emit a plan of which specialist dive tasks to run.
+You are planning a multi-task deep dive on a company. Given the current state
+of the wiki for this ticker, emit a plan of which specialist dive tasks to
+run, then synthesize_memo at the end.
 
-For Monday's MVP, valid dive specialists are:
-  - dive_business     (understand segments, unit economics, revenue mix)
-  - dive_moat         (moat sources, durability, evidence)
-  - dive_financials   (5yr trajectory, margins, balance sheet)
+**Valid specialist task types** (use these EXACT names in the plan — any
+other names will silently be dropped by the plan parser):
+
+  - dive_financial_rigorous   — earnings quality, cash flow, balance sheet,
+                                normalized earnings, INVESTABILITY verdict
+                                (gating: if STOP, siblings are canceled)
+  - dive_business_moat        — business model, segments, unit economics,
+                                competitive durability, switching costs,
+                                pricing power, network effects
+  - dive_industry_structure   — industry economics, Porter's forces, cycle
+                                position, structural trends, company's
+                                position within
+  - dive_capital_allocation   — M&A track record, buybacks, dividends,
+                                dilution, SBC, ROIIC, insider alignment
+  - dive_geopolitical_risk    — cross-border exposure, sanctions,
+                                tariff/trade policy, regulated-industry
+                                risk. Skip if domestic-only + unregulated.
+  - dive_macro                — rate/commodity/FX/cycle sensitivity. Skip
+                                if genuinely macro-neutral.
+  - dive_custom               — anything outside the above (e.g. "legal
+                                overhang", "pipeline Phase-3 readout") —
+                                orchestrator specifies specialty + focus
+  - synthesize_memo           — coordinator-level memo with Buy/Sell/
+                                Neutral/Too Hard decision + target price.
+                                ALWAYS last in the plan.
 
 Output:
+
 (1) Write <vault>/investigations/<handle>.md with:
-    - YAML frontmatter: type, status, scope, hypothesis, entry_nodes, created_at
-    - ## Plan section listing the dive tasks you plan to run (in order)
+    - YAML frontmatter: type, status, scope, hypothesis, entry_nodes,
+      created_at
+    - ## Plan section listing tasks in execution order (numbered), with
+      a short rationale each. The parser extracts task names, so write
+      the exact task-type name at the start of each list item.
     - ## Log section (empty initially)
-(2) Do NOT enqueue the specialist tasks yourself — the dispatcher reads the plan and does it.
-    Your artifact IS the investigation file with the plan.
+
+(2) Your plan MUST include dive_financial_rigorous as the first specialist
+    (it gates sibling dispatch via its INVESTABILITY verdict). It MUST
+    include synthesize_memo as the last task.
+
+(3) For a fresh ticker with no prior research (empty notes.md), emit the
+    full 4-dive default: financial_rigorous, business_moat, industry_structure,
+    capital_allocation, then synthesize_memo. Add geopolitical_risk / macro
+    only if the company has real exposure there (cross-border, commodity,
+    rate-sensitive). Add dive_custom when there's a specific overhang to
+    investigate.
+
+(4) If notes already cover a specialty well AND it's less than 30 days old,
+    you MAY skip that specialty. Be pragmatic — err on including a dive
+    when in doubt.
+
+(5) Do NOT enqueue the specialist tasks yourself — the dispatcher reads
+    the plan and does it.
 """
 )
 
@@ -77,13 +119,19 @@ Frontmatter required:
   entry_nodes: [companies/{payload.ticker}]
   created_at: {now_iso}
 
-Plan section — list dive tasks in execution order, rationalize briefly. E.g.:
-  1. dive_business — understand segments before anything else
-  2. dive_moat — evaluate durability
-  3. dive_financials — quantify the story
-  4. synthesize_memo — crystallize as dated memo
+Plan section — list dive tasks in execution order, rationalize briefly.
+Use the EXACT task names from the system prompt. For a fresh ticker
+(empty notes.md), emit this default 5-item plan:
 
-If notes already cover a section well, you can skip that dive. Be pragmatic.
+  1. dive_financial_rigorous — earnings quality + INVESTABILITY gate
+  2. dive_business_moat — segments, unit economics, durability
+  3. dive_industry_structure — cycle position + competitive landscape
+  4. dive_capital_allocation — stewardship track record
+  5. synthesize_memo — Buy/Sell/Neutral/Too Hard + target price
+
+Add dive_geopolitical_risk and/or dive_macro when the company has real
+exposure there. If notes already cover a specialty within 30 days, you
+may skip that specialty. Err on running the dive when in doubt.
 """
 
     schema = read_vault_schema(ctx.vault_root)
@@ -161,7 +209,24 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
     except OSError:
         plan_text = ""
     parsed_plan = parse_plan(plan_text)
-    plan_types = parsed_plan if parsed_plan else default_plan
+    # Defensive: the LLM sometimes uses renamed or old task-type names
+    # (e.g. dive_business instead of dive_business_moat) — the parser
+    # silently drops unknown names, leaving behind just synthesize_memo.
+    # If the parsed plan has no dive_* specialists, treat as invalid
+    # and fall back to the default plan. Otherwise we'd write a
+    # meaningless "Too Hard" memo on zero research.
+    has_specialist = any(t.value.startswith("dive_") for t in parsed_plan)
+    if parsed_plan and not has_specialist:
+        log.warning(
+            "orchestrate_dive.plan_has_no_specialists",
+            task_id=ctx.task_id,
+            parsed_types=[t.value for t in parsed_plan],
+            action="falling back to default_plan",
+        )
+    if parsed_plan and has_specialist:
+        plan_types = parsed_plan
+    else:
+        plan_types = default_plan
 
     # D24 coverage skip: if fresh themes/concepts already cover the
     # geopolitical or macro dimensions, drop those specialists from the
