@@ -21,7 +21,7 @@ logs/
 .vscode/
 !.vscode/settings.json.example
 node_modules/
-vault/
+/vault/
 !vault_seed/
 .claude-sessions/
 /tmp-claude-*/
