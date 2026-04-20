@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -265,6 +266,72 @@ def validate_orchestrate_dive(payload_raw: dict[str, Any], vault_root: Path) -> 
     return ValidationResult(missing=[s])
 
 
+_FUNDAMENTALS_TOOL_RE = re.compile(
+    r"mcp__fundamentals__\w+|\[fundamentals:\s*\w+", re.IGNORECASE
+)
+_WEB_RETRIEVAL_RE = re.compile(
+    r"WebFetch\s*\(|WebSearch\s*\(|Bash\(curl|https?://[^\s)\]]+", re.IGNORECASE
+)
+_WIKILINK_CITATION_RE = re.compile(r"\[\[_raw/[^\]]+\]\]|\[\[_analyzed/[^\]]+\]\]")
+_SOURCES_CONSULTED_RE = re.compile(r"^##\s+Sources consulted\b", re.MULTILINE | re.IGNORECASE)
+
+
+def _check_research_depth(
+    path_str: str, content: str
+) -> list[ValidationMalformed]:
+    """Enforce dive-quality contract: required Sources section + proof of
+    primary-source retrieval. Returns list of malformed entries (empty if OK)."""
+    issues: list[ValidationMalformed] = []
+    if not _SOURCES_CONSULTED_RE.search(content):
+        issues.append(
+            ValidationMalformed(
+                path=path_str,
+                reason="missing required '## Sources consulted' section",
+            )
+        )
+    fundamentals_hits = len(set(_FUNDAMENTALS_TOOL_RE.findall(content)))
+    web_hits = len(set(_WEB_RETRIEVAL_RE.findall(content)))
+    wikilink_hits = len(set(_WIKILINK_CITATION_RE.findall(content)))
+    # Require at least 3 retrieval markers from ANY combination of fundamentals
+    # MCP, web fetches, or vault wikilinks. Most dives should easily exceed.
+    if fundamentals_hits + web_hits + wikilink_hits < 3:
+        issues.append(
+            ValidationMalformed(
+                path=path_str,
+                reason=(
+                    f"insufficient research evidence: {fundamentals_hits} "
+                    f"fundamentals-MCP + {web_hits} web + {wikilink_hits} "
+                    "_raw/_analyzed citations (need >=3 total)"
+                ),
+            )
+        )
+    return issues
+
+
+def _check_word_budget(
+    path_str: str, content: str, research_priority: int
+) -> list[ValidationMalformed]:
+    """Enforce the ResearchBudget specialist_words cap for this priority,
+    with a 30% overage tolerance (a useful table that pushes the cap is
+    fine; a rambling 2x-over dive is not)."""
+    from praxis_core.research.budget import ResearchBudget
+
+    budget = ResearchBudget.from_priority(research_priority)
+    word_count = len(content.split())
+    cap = int(budget.specialist_words * 1.3)
+    if word_count > cap:
+        return [
+            ValidationMalformed(
+                path=path_str,
+                reason=(
+                    f"dive exceeds word budget ({word_count} words > "
+                    f"{cap} = 1.3x {budget.depth_label})"
+                ),
+            )
+        ]
+    return []
+
+
 def _validate_specialist_dive(
     payload_raw: dict[str, Any],
     vault_root: Path,
@@ -272,7 +339,8 @@ def _validate_specialist_dive(
     min_chars: int = 500,
 ) -> ValidationResult:
     """D19/D53 — specialists write companies/<TICKER>/dives/<specialty>.md
-    as a standalone file. Validator checks it exists and is non-trivial."""
+    as a standalone file. Dive-quality refactor: also check Sources consulted
+    + retrieval evidence + word-budget compliance."""
     payload = DiveSpecialistPayload.model_validate(payload_raw)
     out_path = vc.company_dir(vault_root, payload.ticker) / "dives" / f"{specialty_slug}.md"
     s, exists = _check_file_exists(out_path)
@@ -288,27 +356,44 @@ def _validate_specialist_dive(
                 )
             ]
         )
+    issues: list[ValidationMalformed] = []
+    issues.extend(_check_research_depth(s, content))
+    issues.extend(_check_word_budget(s, content, payload.research_priority))
+    if issues:
+        return ValidationResult(malformed=issues)
     return ValidationResult(ok=[s])
 
 
 def validate_dive_financial_rigorous(
     payload_raw: dict[str, Any], vault_root: Path
 ) -> ValidationResult:
-    # Also require the INVESTABILITY line (D20) — worker reads this post-validation
+    """Financial-rigorous also requires the INVESTABILITY line (D20).
+    Additional strictness: missing INVESTABILITY line is now malformed,
+    not fail-open — the investability handler runs AFTER validation, so a
+    missing line has no gate to fall through to. Better to retry."""
     payload = DiveSpecialistPayload.model_validate(payload_raw)
     out_path = vc.company_dir(vault_root, payload.ticker) / "dives" / "financial-rigorous.md"
     s, exists = _check_file_exists(out_path)
     if not exists:
         return ValidationResult(missing=[s])
     content = out_path.read_text(encoding="utf-8", errors="replace")
+    issues: list[ValidationMalformed] = []
     if len(content) < 500:
-        return ValidationResult(
-            malformed=[
-                ValidationMalformed(path=s, reason=f"dive output too small ({len(content)} chars)")
-            ]
+        issues.append(
+            ValidationMalformed(path=s, reason=f"dive output too small ({len(content)} chars)")
         )
-    # D20 fail-open: if INVESTABILITY line is absent, treat as CONTINUE (malformed
-    # but not blocking — handled in worker post-validation step later)
+    else:
+        issues.extend(_check_research_depth(s, content))
+        issues.extend(_check_word_budget(s, content, payload.research_priority))
+        if not re.search(r"^\s*INVESTABILITY:\s*(CONTINUE|STOP)\s*[—-]", content, re.MULTILINE | re.IGNORECASE):
+            issues.append(
+                ValidationMalformed(
+                    path=s,
+                    reason="missing INVESTABILITY: CONTINUE|STOP verdict line",
+                )
+            )
+    if issues:
+        return ValidationResult(malformed=issues)
     return ValidationResult(ok=[s])
 
 

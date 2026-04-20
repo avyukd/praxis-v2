@@ -16,6 +16,7 @@ BASE_ALLOWED_TOOLS = [
 ]
 
 DIVE_ALLOWED_TOOLS = BASE_ALLOWED_TOOLS + [
+    # Fundamentals MCP — first-line for quantitative data.
     "mcp__fundamentals__company_overview",
     "mcp__fundamentals__list_financial_metrics",
     "mcp__fundamentals__get_financial_data",
@@ -24,6 +25,11 @@ DIVE_ALLOWED_TOOLS = BASE_ALLOWED_TOOLS + [
     "mcp__fundamentals__get_holders",
     "mcp__fundamentals__get_price",
     "mcp__fundamentals__search_fundamentals",
+    # Web access — required for dives to pull primary sources (SEC EDGAR,
+    # SEDAR+, company IR, earnings transcripts) when the vault is thin.
+    "WebFetch",
+    "WebSearch",
+    "Bash(curl:*)",
 ]
 
 

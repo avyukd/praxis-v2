@@ -14,3 +14,5 @@
 2026-04-20T14:10:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 161 success / 0 running / 50 dl — filing_rejected since fix: 0 — rl clear — (separate known issue: poller missing ~43 8-Ks today due to 40-entry feed-window rollover + Fri-after-hours — awaiting user decision on fix approach)
 2026-04-20T14:28:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 211 success / 10 queued / 4 running / 50 dl — dl_recent=0 — rl clear — throughput up 20x post press-release fix (41 analyze_filing successes in 30min vs 2 before fix)
 2026-04-20T14:48:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 236 success / 0 queued / 0 running / 50 dl — 30min: 27 analyze + 4 memo + 3 each compile/dive/notify — dl_recent=0 — rl clear
+2026-04-20T15:02:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 236 success / 0 queued / 0 running / 50 dl — last activity 11:34 PT (16min idle — real world lull, 1 new filing_8_k + 1 cnw rejection in last 15min) — rl clear
+2026-04-20T15:17:00-04:00 — tier-0 — no red signals — services-up: 6/6 — tasks: 240 success / 0 queued / 0 running / 50 dl — rl clear

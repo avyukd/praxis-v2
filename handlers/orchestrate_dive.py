@@ -170,27 +170,30 @@ If notes already cover a section well, you can skip that dive. Be pragmatic.
 
     memo_handle = f"{payload.ticker.lower()}-dive-{et_date_str().replace('-', '')}"
 
-    def _payload_for(task_type: TaskType) -> dict:
-        if task_type == TaskType.SYNTHESIZE_MEMO:
-            return {
-                "ticker": payload.ticker,
-                "investigation_handle": payload.investigation_handle,
-                "thesis_handle": payload.thesis_handle,
-                "memo_handle": memo_handle,
-            }
-        return {
-            "ticker": payload.ticker,
-            "investigation_handle": payload.investigation_handle,
-        }
-
-    plan_sequence: list[tuple[TaskType, dict]] = [(t, _payload_for(t)) for t in plan_types]
-
     async def _enqueue_sequence(s) -> None:
         inv = (
             await s.execute(
                 select(Investigation).where(Investigation.handle == payload.investigation_handle)
             )
         ).scalar_one()
+
+        # Propagate the investigation's research_priority down to every dive
+        # + synthesize_memo task. The dive base uses this to size the
+        # ResearchBudget (word cap, web lookups, LLM $ budget).
+        research_priority = getattr(inv, "research_priority", 5) or 5
+
+        def _payload_for(task_type: TaskType) -> dict:
+            base = {
+                "ticker": payload.ticker,
+                "investigation_handle": payload.investigation_handle,
+                "research_priority": research_priority,
+            }
+            if task_type == TaskType.SYNTHESIZE_MEMO:
+                base["thesis_handle"] = payload.thesis_handle
+                base["memo_handle"] = memo_handle
+            return base
+
+        plan_sequence = [(t, _payload_for(t)) for t in plan_types]
         for task_type, sub_payload in plan_sequence:
             await enqueue_task(
                 s,
