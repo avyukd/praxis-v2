@@ -240,8 +240,36 @@ def plan(source_root: Path, target_root: Path) -> tuple[RenameMap, VaultMigratio
     return rename_map, report
 
 
+def _seed_vault_root(target_root: Path) -> None:
+    """D55 — copy vault_seed/CLAUDE.md, INDEX.md, LOG.md into target root.
+
+    These are required for the running system: handlers call
+    read_vault_schema() which reads CLAUDE.md; refresh_index rebuilds
+    INDEX.md; compile_to_wiki + notify append to LOG.md.
+    """
+    from praxis_core.time_et import et_iso
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    seed_dir = repo_root / "vault_seed"
+
+    for fname in ("CLAUDE.md", "INDEX.md", "LOG.md"):
+        src = seed_dir / fname
+        dst = target_root / fname
+        if src.is_file() and not dst.exists():
+            import shutil as _sh
+
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            _sh.copy2(src, dst)
+
+    # Stamp migration marker
+    marker = target_root / ".migrated"
+    if not marker.exists():
+        marker.write_text(f"migrated_at={et_iso()}\n")
+
+
 def apply(source_root: Path, target_root: Path) -> VaultMigrationReport:
     """Execute the migration. Writes into target_root (should be empty or staging)."""
+    _seed_vault_root(target_root)  # D55 — seed CLAUDE.md / INDEX.md / LOG.md first
     known_tickers = discover_known_tickers(source_root)
     rename_map = build_rename_map(source_root, known_tickers=known_tickers)
     report = VaultMigrationReport(source_root=source_root, target_root=target_root)

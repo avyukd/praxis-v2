@@ -100,10 +100,16 @@ class WorkspaceMigrationReport:
         return "\n".join(lines)
 
 
+# Map copilot's analyst filenames to praxis-v2 dive-specialty slugs (D53+D54).
+# Output lands at companies/<TICKER>/dives/<slug>.md matching Section B's taxonomy.
 _ANALYST_REPORTS = {
-    "rigorous-financial-analyst.md": "rigorous-financial",
+    "rigorous-financial-analyst.md": "financial-rigorous",
     "business-moat-analyst.md": "business-moat",
+    "industry-structure-cycle-analyst.md": "industry-structure",
+    "capital-allocation-analyst.md": "capital-allocation",
+    "geopolitical-risk-analyst.md": "geopolitical-risk",
     "macro-analyst.md": "macro",
+    "supplement-reader-analyst.md": "supplement-reader",
 }
 
 
@@ -167,18 +173,19 @@ def _migrate_ticker(
         report.total_files_written += 1
         wrote_any = True
 
-    # Analyst reports
+    # Specialist dive outputs — D53: land at companies/<TICKER>/dives/<slug>.md
+    # matching Section B handler output convention.
     has_report = False
-    for src_name, report_slug in _ANALYST_REPORTS.items():
+    for src_name, specialty_slug in _ANALYST_REPORTS.items():
         src = ticker_dir / src_name
         if not src.is_file():
             continue
         body = src.read_text(encoding="utf-8", errors="replace")
-        target = target_root / f"companies/{ticker}/analyst_reports/{report_slug}.md"
+        target = target_root / f"companies/{ticker}/dives/{specialty_slug}.md"
         metadata = {
-            "type": "analyst_report",
+            "type": "dive",
             "ticker": ticker,
-            "specialist": report_slug,
+            "specialist": specialty_slug,
             "status": "migrated",
             "data_vintage": _file_mtime_date(src),
             "source": "copilot_workspace",

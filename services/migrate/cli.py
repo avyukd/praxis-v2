@@ -199,6 +199,74 @@ def validate(target: str) -> None:
             click.echo(f"  {src} → [[{tgt_link}]]")
 
 
+@cli.command()
+@click.option("--staging", required=True, type=click.Path())
+@click.option("--production", required=True, type=click.Path())
+@click.option("--force/--no-force", default=False, help="Allow non-empty production dir")
+@click.option(
+    "--merge/--replace",
+    default=True,
+    help="Merge staging into production (rsync; preserves live data) vs replace",
+)
+def cutover(staging: str, production: str, force: bool, merge: bool) -> None:
+    """D57 cutover: staging vault → production vault.
+
+    Default: merge mode (rsync --ignore-existing) preserves anything
+    already in production (critical if the live system is running).
+    Use --replace for a clean swap (destructive to production).
+    """
+    import shutil
+    import subprocess
+
+    stg = Path(staging).expanduser()
+    prod = Path(production).expanduser()
+
+    if not stg.is_dir():
+        raise click.ClickException(f"staging {stg} does not exist")
+
+    if prod.exists() and any(prod.iterdir()) and not force and not merge:
+        raise click.ClickException(
+            f"production {prod} is non-empty. Use --merge to preserve "
+            "existing content, or --force --replace to clobber."
+        )
+
+    prod.mkdir(parents=True, exist_ok=True)
+
+    if merge:
+        # rsync --ignore-existing: only write files not already present in prod
+        # (live system wins for any conflicting path)
+        result = subprocess.run(
+            [
+                "rsync",
+                "-a",
+                "--ignore-existing",
+                f"{stg}/",
+                f"{prod}/",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise click.ClickException(f"rsync failed: {result.stderr}")
+        click.echo(f"Merged {stg} → {prod} (live data preserved)")
+    else:
+        if prod.exists():
+            shutil.rmtree(prod)
+        shutil.copytree(stg, prod)
+        click.echo(f"Replaced {prod} with {stg} contents")
+
+    log_path = prod / "_cutover.log"
+    from praxis_core.time_et import et_iso
+
+    with open(log_path, "a") as f:
+        f.write(f"{et_iso()}\tsource={stg}\tmode={'merge' if merge else 'replace'}\n")
+    click.echo(f"Cutover logged: {log_path}")
+    click.echo("")
+    click.echo("Next steps:")
+    click.echo("  1. scripts/smoke.sh")
+    click.echo("  2. Restart pollers if they were stopped")
+
+
 @cli.command("import-copilot-state")
 @click.option("--copilot-data", required=True, type=click.Path())
 @click.option("--apply/--dry-run", default=False, help="Actually write to Postgres")
