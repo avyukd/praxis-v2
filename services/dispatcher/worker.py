@@ -49,6 +49,41 @@ async def _heartbeat_loop(task_id: uuid.UUID, worker_id: str, stop: asyncio.Even
             pass
 
 
+async def _cancel_watch_loop(
+    task_id: uuid.UUID,
+    stop: asyncio.Event,
+    cancel_event: asyncio.Event,
+) -> None:
+    """Poll task.status every N seconds. Set cancel_event if it flips to 'canceled'.
+
+    D31.b — responsive tear-down for cancel_task / cancel_investigation.
+    """
+    from sqlalchemy import text
+
+    settings = get_settings()
+    interval = max(1, settings.worker_cancel_poll_interval_s)
+    while not stop.is_set():
+        try:
+            async with session_scope() as session:
+                row = (
+                    await session.execute(
+                        text("SELECT status FROM tasks WHERE id = :id"),
+                        {"id": task_id},
+                    )
+                ).first()
+                if row is not None and row.status == "canceled":
+                    log.info("worker.cancel_observed", task_id=str(task_id))
+                    cancel_event.set()
+                    stop.set()
+                    return
+        except Exception as e:
+            log.warning("worker.cancel_watch_fail", task_id=str(task_id), error=str(e))
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except TimeoutError:
+            pass
+
+
 async def execute_task(task: Task, worker_id: str) -> None:
     """Run a single task to completion. Caller must have already claimed it.
 
@@ -66,11 +101,14 @@ async def execute_task(task: Task, worker_id: str) -> None:
         return
 
     stop = asyncio.Event()
+    cancel_event = asyncio.Event()
     hb_task = asyncio.create_task(_heartbeat_loop(task.id, worker_id, stop))
+    cw_task = asyncio.create_task(_cancel_watch_loop(task.id, stop, cancel_event))
     rate_limiter = RateLimitManager()
 
     result: HandlerResult | None = None
     handler_error: tuple[str, bool] | None = None  # (msg, is_timeout)
+    canceled_observed = False
 
     try:
         # Open a session for the handler to share — lets handlers do task-adjacent writes
@@ -90,9 +128,48 @@ async def execute_task(task: Task, worker_id: str) -> None:
                 "task_start",
                 {"task_id": str(task.id), "type": task.type, "worker_id": worker_id},
             )
-            result = await asyncio.wait_for(
-                handler(ctx), timeout=max(60, settings.cli_wall_clock_timeout_s + 120)
+
+            # D31.b: race handler against cancel_event. On cancel, propagate
+            # CancelledError into the handler → CLIInvoker's finally kills subproc.
+            handler_task = asyncio.create_task(handler(ctx))
+            cancel_waiter = asyncio.create_task(cancel_event.wait())
+            wall_timeout = max(60, settings.cli_wall_clock_timeout_s + 120)
+
+            done, pending = await asyncio.wait(
+                {handler_task, cancel_waiter},
+                timeout=wall_timeout,
+                return_when=asyncio.FIRST_COMPLETED,
             )
+
+            if cancel_waiter in done:
+                handler_task.cancel()
+                try:
+                    await handler_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+                canceled_observed = True
+            elif handler_task in done:
+                cancel_waiter.cancel()
+                try:
+                    await cancel_waiter
+                except asyncio.CancelledError:
+                    pass
+                result = handler_task.result()
+            else:
+                # timeout: both still pending
+                handler_task.cancel()
+                cancel_waiter.cancel()
+                try:
+                    await handler_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                try:
+                    await cancel_waiter
+                except asyncio.CancelledError:
+                    pass
+                raise TimeoutError("handler wall-clock timeout")
     except TimeoutError:
         handler_error = ("handler wall-clock timeout", True)
     except Exception as e:
@@ -102,10 +179,20 @@ async def execute_task(task: Task, worker_id: str) -> None:
         )
     finally:
         stop.set()
-        try:
-            await hb_task
-        except Exception:
-            pass
+        for t in (hb_task, cw_task):
+            try:
+                await t
+            except Exception:
+                pass
+
+    if canceled_observed:
+        await emit_event(
+            "dispatcher.worker",
+            "task_canceled_observed",
+            {"task_id": str(task.id), "type": task.type, "worker_id": worker_id},
+        )
+        # DB already holds status='canceled'; don't overwrite via mark_*.
+        return
 
     if handler_error is not None:
         async with session_scope() as session:

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     dispatcher_tick_interval_s: float = 2.0
     worker_lease_s: int = 300
     worker_heartbeat_interval_s: int = 60
+    worker_cancel_poll_interval_s: int = 5
     cli_no_event_timeout_s: int = 60
     cli_wall_clock_timeout_s: int = 600
 

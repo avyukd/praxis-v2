@@ -297,30 +297,114 @@ async def open_investigation(
     return {"ok": True, "handle": handle, "scope": scope}
 
 
+# D32 — pause_investigation / resume_investigation removed as of Section C.
+# Use cancel_investigation below instead; reintroduce durable hold/unhold
+# semantics later with proper dispatch gating if multi-week investigations
+# become a real use case.
+
+
 @mcp.tool()
-async def pause_investigation(handle: str) -> dict[str, Any]:
+async def cancel_investigation(
+    handle: str, cascade: bool = True
+) -> dict[str, Any]:
+    """Cancel an investigation and optionally its downstream tasks.
+
+    Default (cascade=True): kills every non-terminal task for this
+    investigation. Running tasks observe the cancel via the worker's
+    cancel-watch loop within ~5-10s (D31.b) and tear down the subprocess.
+
+    cascade=False: just marks the investigation abandoned; running tasks
+    keep going to completion.
+    """
+    from praxis_core.time_et import now_utc
+    from sqlalchemy import update
+
     async with session_scope() as session:
         inv = (
             await session.execute(select(Investigation).where(Investigation.handle == handle))
         ).scalar_one_or_none()
         if inv is None:
             return {"ok": False, "error": "not found"}
-        inv.status = "paused"
-        await emit_event("mcp.server", "investigation_paused", {"handle": handle})
-    return {"ok": True, "handle": handle}
+
+        affected = 0
+        if cascade:
+            stmt = (
+                update(Task)
+                .where(Task.investigation_id == inv.id)
+                .where(Task.status.in_(("queued", "partial", "running")))
+                .values(
+                    status="canceled",
+                    finished_at=now_utc(),
+                    lease_holder=None,
+                    lease_expires_at=None,
+                    last_error="investigation_canceled",
+                )
+                .returning(Task.id)
+            )
+            result = await session.execute(stmt)
+            affected = len(list(result.scalars().all()))
+
+        inv.status = "abandoned"
+        inv.resolved_at = now_utc()
+
+        await emit_event(
+            "mcp.server",
+            "investigation_canceled",
+            {"handle": handle, "cascade": cascade, "affected_tasks": affected},
+        )
+
+    return {
+        "ok": True,
+        "handle": handle,
+        "status": "abandoned",
+        "cascade": cascade,
+        "affected_tasks": affected,
+    }
 
 
 @mcp.tool()
-async def resume_investigation(handle: str) -> dict[str, Any]:
+async def list_investigations(
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List investigations, newest-progress first. Optional status filter:
+    one of active | resolved | abandoned. Returns per-investigation task
+    counts grouped by status."""
+    from sqlalchemy import func
+
     async with session_scope() as session:
-        inv = (
-            await session.execute(select(Investigation).where(Investigation.handle == handle))
-        ).scalar_one_or_none()
-        if inv is None:
-            return {"ok": False, "error": "not found"}
-        inv.status = "active"
-        await emit_event("mcp.server", "investigation_resumed", {"handle": handle})
-    return {"ok": True, "handle": handle}
+        q = select(Investigation).order_by(desc(Investigation.last_progress_at)).limit(limit)
+        if status:
+            q = q.where(Investigation.status == status)
+        rows = (await session.execute(q)).scalars().all()
+
+        out: list[dict[str, Any]] = []
+        for inv in rows:
+            # Task counts per status for this investigation
+            count_rows = (
+                await session.execute(
+                    select(Task.status, func.count(Task.id))
+                    .where(Task.investigation_id == inv.id)
+                    .group_by(Task.status)
+                )
+            ).all()
+            counts = {row[0]: row[1] for row in count_rows}
+            out.append(
+                {
+                    "handle": inv.handle,
+                    "status": inv.status,
+                    "scope": inv.scope,
+                    "initiated_by": inv.initiated_by,
+                    "hypothesis": inv.hypothesis,
+                    "created_at": inv.created_at.isoformat() if inv.created_at else None,
+                    "last_progress_at": (
+                        inv.last_progress_at.isoformat() if inv.last_progress_at else None
+                    ),
+                    "resolved_at": inv.resolved_at.isoformat() if inv.resolved_at else None,
+                    "task_counts": counts,
+                }
+            )
+        return out
 
 
 # -----------------

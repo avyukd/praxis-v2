@@ -148,6 +148,8 @@ async def mark_success(
     validation: ValidationResult | None = None,
     telemetry: dict[str, Any] | None = None,
 ) -> None:
+    """Transition task to success. No-op if task is already in a terminal state
+    (e.g., canceled via MCP while the worker was still running — D31.a guard)."""
     v = validation.model_dump() if validation else None
     await session.execute(
         text(
@@ -159,7 +161,7 @@ async def mark_success(
                 lease_expires_at = NULL,
                 validation_result = :validation,
                 telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(CAST(:telemetry AS jsonb), '{}'::jsonb)
-            WHERE id = :task_id
+            WHERE id = :task_id AND status = 'running'
             """
         ),
         {"task_id": task_id, "validation": _jsonb(v), "telemetry": _jsonb(telemetry)},
@@ -173,6 +175,7 @@ async def mark_partial(
     validation: ValidationResult,
     telemetry: dict[str, Any] | None = None,
 ) -> None:
+    """No-op if task is already terminal (D31.a guard)."""
     await session.execute(
         text(
             """
@@ -183,7 +186,7 @@ async def mark_partial(
                 lease_expires_at = NULL,
                 validation_result = :validation,
                 telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(CAST(:telemetry AS jsonb), '{}'::jsonb)
-            WHERE id = :task_id
+            WHERE id = :task_id AND status = 'running'
             """
         ),
         {
@@ -201,6 +204,7 @@ async def mark_failed(
     error: str,
     telemetry: dict[str, Any] | None = None,
 ) -> None:
+    """No-op if task is already terminal (D31.a guard)."""
     await session.execute(
         text(
             """
@@ -210,7 +214,7 @@ async def mark_failed(
                 lease_expires_at = NULL,
                 last_error = :error,
                 telemetry = COALESCE(telemetry, '{}'::jsonb) || COALESCE(CAST(:telemetry AS jsonb), '{}'::jsonb)
-            WHERE id = :task_id
+            WHERE id = :task_id AND status = 'running'
             """
         ),
         {"task_id": task_id, "error": error[:2000], "telemetry": _jsonb(telemetry)},
@@ -240,7 +244,7 @@ async def mark_dead_letter(session: AsyncSession, task_id: uuid.UUID, final_erro
                 lease_holder = NULL,
                 lease_expires_at = NULL,
                 last_error = :error
-            WHERE id = :task_id
+            WHERE id = :task_id AND status IN ('running', 'failed')
             """
         ),
         {"task_id": task_id, "error": final_error[:2000]},

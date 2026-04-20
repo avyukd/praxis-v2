@@ -569,6 +569,19 @@ Existing tests must not regress:
 - [x] D1-D18 decisions — locked in through review session 2026-04-19
 - [x] Prompt drafts reviewed
 - [x] Open items O1-O5 resolved (parity-with-copilot)
+- [x] Dependencies added (beautifulsoup4, lxml, boto3, pyyaml, psycopg2-binary, moto)
+- [x] Schemas written (AnalysisResult, ScreenResult; AnalysisSignals deleted)
+- [x] Vault conventions extended (raw_pr_dir, analyzed_pr_dir)
+- [x] praxis_core/newswire/ ported (models, gnw, cnw, newsfile, dedup, rate, state)
+- [x] get_cached_mcap helper written
+- [x] Handler rewritten (two-stage Haiku→Sonnet cascade + downstream enqueues)
+- [x] press_us poller written
+- [x] press_ca poller written
+- [x] Validator updated (screen.json required; analysis.json gated on outcome)
+- [ ] Procfile + systemd units added (Section G)
+- [x] Unit tests green (158/158 pass, 20 skipped)
+- [ ] Integration tests green (pending — after handler end-to-end fixture test)
+- [ ] Manual smoke (one of each: 8-K, US PR, CA PR) — pending Section G deploy
 - [ ] Dependencies added
 - [ ] Schemas written
 - [ ] Vault conventions extended
