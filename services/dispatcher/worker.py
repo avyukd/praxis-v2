@@ -112,69 +112,75 @@ async def execute_task(task: Task, worker_id: str) -> None:
     canceled_observed = False
 
     try:
-        # Open a session for the handler to share — lets handlers do task-adjacent writes
-        # (investigation updates, signal records) in a single transaction. The outer
-        # session (below) still handles the task lifecycle bookkeeping.
-        async with session_scope() as handler_session:
-            ctx = HandlerContext(
-                task_id=str(task.id),
-                task_type=task.type,
-                payload=task.payload,
-                vault_root=settings.vault_root,
-                model=task.model,
-                session=handler_session,
-            )
-            await emit_event(
-                "dispatcher.worker",
-                "task_start",
-                {"task_id": str(task.id), "type": task.type, "worker_id": worker_id},
-            )
+        # Handlers get no shared session. A prior design passed a
+        # long-lived session so "task-adjacent writes" could be atomic
+        # with task lifecycle. In practice handlers do one read at the
+        # top (e.g. SELECT investigations.initiated_by) then run an LLM
+        # call for 15+ min. The read opened an asyncpg transaction that
+        # sat 'idle in transaction' for the full LLM duration, starving
+        # the pg connection pool and hanging the dispatcher.
+        # Every handler using ctx.session has a graceful `if is None:
+        # async with session_scope()` fallback — they now hit that path
+        # and commit after each logical unit of work.
+        ctx = HandlerContext(
+            task_id=str(task.id),
+            task_type=task.type,
+            payload=task.payload,
+            vault_root=settings.vault_root,
+            model=task.model,
+            session=None,
+        )
+        await emit_event(
+            "dispatcher.worker",
+            "task_start",
+            {"task_id": str(task.id), "type": task.type, "worker_id": worker_id},
+        )
 
-            # D31.b: race handler against cancel_event. On cancel, propagate
-            # CancelledError into the handler → CLIInvoker's finally kills subproc.
-            handler_task = asyncio.create_task(handler(ctx))
-            cancel_waiter = asyncio.create_task(cancel_event.wait())
-            # Worker-level wall timeout sits ABOVE the CLI invoker's own
-            # timeout so the invoker's SIGTERM grace window (60s) + SIGKILL
-            # fallback can all run before the worker gives up on the task.
-            # CLI 3600s + 300s buffer = 3900s (65 min) at default config.
-            wall_timeout = max(60, settings.cli_wall_clock_timeout_s + 300)
+        # D31.b: race handler against cancel_event. On cancel, propagate
+        # CancelledError into the handler → CLIInvoker's finally kills subproc.
+        handler_task = asyncio.create_task(handler(ctx))
+        cancel_waiter = asyncio.create_task(cancel_event.wait())
+        # Worker-level wall timeout sits ABOVE the CLI invoker's own
+        # timeout so the invoker's SIGTERM grace window (60s) + SIGKILL
+        # fallback can all run before the worker gives up on the task.
+        # CLI 3600s + 300s buffer = 3900s (65 min) at default config.
+        wall_timeout = max(60, settings.cli_wall_clock_timeout_s + 300)
 
-            done, pending = await asyncio.wait(
-                {handler_task, cancel_waiter},
-                timeout=wall_timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+        done, pending = await asyncio.wait(
+            {handler_task, cancel_waiter},
+            timeout=wall_timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
 
-            if cancel_waiter in done:
-                handler_task.cancel()
-                try:
-                    await handler_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception:
-                    pass
-                canceled_observed = True
-            elif handler_task in done:
-                cancel_waiter.cancel()
-                try:
-                    await cancel_waiter
-                except asyncio.CancelledError:
-                    pass
-                result = handler_task.result()
-            else:
-                # timeout: both still pending
-                handler_task.cancel()
-                cancel_waiter.cancel()
-                try:
-                    await handler_task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                try:
-                    await cancel_waiter
-                except asyncio.CancelledError:
-                    pass
-                raise TimeoutError("handler wall-clock timeout")
+        if cancel_waiter in done:
+            handler_task.cancel()
+            try:
+                await handler_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            canceled_observed = True
+        elif handler_task in done:
+            cancel_waiter.cancel()
+            try:
+                await cancel_waiter
+            except asyncio.CancelledError:
+                pass
+            result = handler_task.result()
+        else:
+            # timeout: both still pending
+            handler_task.cancel()
+            cancel_waiter.cancel()
+            try:
+                await handler_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            try:
+                await cancel_waiter
+            except asyncio.CancelledError:
+                pass
+            raise TimeoutError("handler wall-clock timeout")
     except TimeoutError:
         handler_error = ("handler wall-clock timeout", True)
     except Exception as e:
