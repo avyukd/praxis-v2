@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from praxis_core.llm.invoker import CLIInvoker, LLMResult
+from praxis_core.llm.invoker import CLIInvoker, LLMResult, require_claude_cli
 from praxis_core.schemas.task_types import TaskModel
 
 
@@ -236,3 +236,48 @@ exit 0
     assert all(r.finish_reason == "stop" for r in results)
     # If parallelism works, 3 x 1s calls should finish in well under 3s (with overhead, < 2s)
     assert duration < 2.5, f"concurrent calls serialized: took {duration:.2f}s for 3x1s"
+
+
+@pytest.mark.asyncio
+async def test_cli_invoker_handles_large_single_line_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    large_text = "x" * 120_000
+    bin_dir = _write_fake_claude(
+        tmp_path,
+        [
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": large_text,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+                "total_cost_usd": 0.001,
+            }
+        ],
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    invoker = CLIInvoker()
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    result = await invoker.run(
+        system_prompt="",
+        user_prompt="hi",
+        model=TaskModel.HAIKU,
+        timeout_s=30,
+        no_event_timeout_s=10,
+        session_dir=session_dir,
+    )
+
+    assert result.finish_reason == "stop"
+    assert result.text == large_text
+
+
+def test_require_claude_cli_raises_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path / "missing-bin"))
+    monkeypatch.setenv("HOME", str(tmp_path / "missing-home"))
+
+    with pytest.raises(FileNotFoundError, match="Claude CLI not found"):
+        require_claude_cli()

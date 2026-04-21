@@ -6,6 +6,7 @@ import uuid
 
 from praxis_core.config import get_settings
 from praxis_core.db.session import session_scope
+from praxis_core.llm.invoker import require_claude_cli
 from praxis_core.llm.rate_limit import RateLimitManager
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
@@ -103,11 +104,16 @@ async def _dispatch_tick(pool: WorkerPool) -> int:
 async def run_loop() -> None:
     configure_logging()
     settings = get_settings()
+    if settings.praxis_invoker == "cli":
+        claude_path = require_claude_cli()
+    else:
+        claude_path = None
     log.info(
         "dispatcher.start",
         pool_size=settings.dispatcher_pool_size,
         tick_s=settings.dispatcher_tick_interval_s,
         invoker=settings.praxis_invoker,
+        claude_path=claude_path,
     )
 
     pool = WorkerPool(size=settings.dispatcher_pool_size)

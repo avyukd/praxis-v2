@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from praxis_core.config import get_settings
 from praxis_core.db.models import Heartbeat, Task
 from praxis_core.db.session import session_scope
+from praxis_core.llm.invoker import require_claude_cli
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat, stale_components
+from praxis_core.observability.sd_notify import notify_ready, notify_stopping, notify_watchdog
 from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import now_et, now_utc
@@ -235,7 +237,12 @@ def _should_alert(fingerprint: str, cooldown_s: int = 900) -> bool:
 
 async def run_loop() -> None:
     configure_logging()
-    log.info("scheduler.start")
+    settings = get_settings()
+    if settings.praxis_invoker == "cli":
+        claude_path = require_claude_cli()
+    else:
+        claude_path = None
+    log.info("scheduler.start", invoker=settings.praxis_invoker, claude_path=claude_path)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -243,6 +250,7 @@ async def run_loop() -> None:
         loop.add_signal_handler(sig, stop_event.set)
 
     await emit_event("scheduler.main", "started", {})
+    notify_ready()
 
     while not stop_event.is_set():
         now = now_utc()
@@ -278,6 +286,7 @@ async def run_loop() -> None:
 
         from praxis_core.time_et import et_iso
 
+        notify_watchdog()
         await beat(
             "scheduler.main",
             status={
@@ -292,6 +301,7 @@ async def run_loop() -> None:
         except TimeoutError:
             pass
 
+    notify_stopping()
     log.info("scheduler.shutdown")
 
 

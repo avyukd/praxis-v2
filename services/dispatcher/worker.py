@@ -33,6 +33,15 @@ log = get_logger("dispatcher.worker")
 RATE_LIMIT_BOUNCE_CAP = 10
 
 
+def validation_failure_reason(validation) -> str:
+    if validation.malformed:
+        reasons = [f"{item.path}: {item.reason}" for item in validation.malformed]
+        return "artifacts malformed: " + "; ".join(reasons)
+    if validation.missing:
+        return f"artifacts missing: {validation.missing}"
+    return "validation failed with no details"
+
+
 async def _heartbeat_loop(task_id: uuid.UUID, worker_id: str, stop: asyncio.Event) -> None:
     settings = get_settings()
     interval = max(10, settings.worker_heartbeat_interval_s)
@@ -353,7 +362,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
             )
             return
 
-        await _handle_failure(session, task, f"artifacts missing: {validation.missing}")
+        await _handle_failure(session, task, validation_failure_reason(validation))
 
 
 async def _handle_failure(session, task: Task, error: str) -> None:

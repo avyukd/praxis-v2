@@ -6,6 +6,7 @@ import shutil
 import signal
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -72,6 +73,22 @@ def _locate_claude_cli() -> str:
         if c.exists() and c.is_file():
             return str(c)
     return "claude"  # fall through; will fail loudly at subprocess launch
+
+
+def require_claude_cli() -> str:
+    """Return the Claude CLI path or raise a clear startup-time error.
+
+    This lets long-running services fail fast before they consume tasks if
+    the host no longer has the CLI available on PATH.
+    """
+    resolved = _locate_claude_cli()
+    if resolved != "claude":
+        return resolved
+    if shutil.which("claude"):
+        return "claude"
+    raise FileNotFoundError(
+        "Claude CLI not found. Install `claude` or set PRAXIS_INVOKER=api before starting workers."
+    )
 
 
 class LLMInvoker(Protocol):
@@ -166,37 +183,55 @@ class CLIInvoker:
 
         finish: FinishReason = "error"
 
-        async def _read_stdout() -> FinishReason:
+        async def _iter_stdout_lines() -> AsyncIterator[str]:
+            """Yield newline-delimited stdout lines without StreamReader.readline().
+
+            Claude's `--output-format=stream-json` can emit very large single-line
+            JSON events. `readline()` is bounded by asyncio's stream limit and can
+            raise LimitOverrunError, which dead-letters the whole task. Read in
+            chunks instead and split on newlines ourselves.
+            """
             assert proc.stdout is not None
-            nonlocal finish
+            buffer = bytearray()
             while True:
                 try:
-                    line_bytes = await asyncio.wait_for(
-                        proc.stdout.readline(), timeout=no_event_timeout_s
+                    chunk = await asyncio.wait_for(
+                        proc.stdout.read(65536), timeout=no_event_timeout_s
                     )
                 except TimeoutError:
-                    log.warning(
-                        "cli.invoke.no_event_timeout",
-                        gap_s=no_event_timeout_s,
-                    )
-                    return "timeout"
-                if not line_bytes:
-                    return finish
-                try:
-                    line = line_bytes.decode("utf-8", errors="replace")
-                except Exception:
-                    continue
-                event = parser.feed_line(line)
-                if event is None:
-                    continue
-                if event.is_rate_limit:
-                    log.warning(
-                        "cli.invoke.rate_limit_detected",
-                        event_type=event.event_type,
-                    )
-                    return "rate_limit"
-                if event.is_result:
-                    return "stop" if not parser.hit_error else "error"
+                    log.warning("cli.invoke.no_event_timeout", gap_s=no_event_timeout_s)
+                    raise
+                if not chunk:
+                    if buffer:
+                        yield buffer.decode("utf-8", errors="replace")
+                    break
+                buffer.extend(chunk)
+                while True:
+                    newline_index = buffer.find(b"\n")
+                    if newline_index < 0:
+                        break
+                    line = bytes(buffer[:newline_index])
+                    del buffer[: newline_index + 1]
+                    yield line.decode("utf-8", errors="replace")
+
+        async def _read_stdout() -> FinishReason:
+            nonlocal finish
+            try:
+                async for line in _iter_stdout_lines():
+                    event = parser.feed_line(line)
+                    if event is None:
+                        continue
+                    if event.is_rate_limit:
+                        log.warning(
+                            "cli.invoke.rate_limit_detected",
+                            event_type=event.event_type,
+                        )
+                        return "rate_limit"
+                    if event.is_result:
+                        return "stop" if not parser.hit_error else "error"
+            except TimeoutError:
+                return "timeout"
+            return finish
 
         async def _read_with_soft_warning() -> FinishReason:
             """Wraps _read_stdout to emit a journal-visible warning 5 min
