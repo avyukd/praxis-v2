@@ -27,6 +27,7 @@ from praxis_core.schemas.task_types import TaskModel
 from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import et_iso
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.constitution import constitution_prompt_block
 from praxis_core.vault.followups import write_followup
 from praxis_core.vault.writer import atomic_write
 
@@ -191,7 +192,10 @@ Process (non-negotiable — the validator checks for proof of each step):
 """
 
     schema = read_vault_schema(ctx.vault_root)
-    system = system_prompt + ("\n\n## Vault schema\n" + schema if schema else "")
+    constitution = constitution_prompt_block(ctx.vault_root)
+    system = system_prompt + (
+        ("\n\n" + constitution) if constitution else ""
+    ) + ("\n\n## Vault schema\n" + schema if schema else "")
 
     result = await run_llm(
         system_prompt=system,

@@ -25,6 +25,13 @@ from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.constitution import (
+    append_principle,
+    constitution_path,
+    read_constitution,
+    remove_principle,
+    replace_constitution,
+)
 from praxis_core.vault.steering import append_steering, recent_steering, steering_path
 from praxis_core.vault.writer import atomic_write
 
@@ -170,6 +177,89 @@ async def list_surfaced_ideas(
         }
         for r in rows
     ]
+
+
+@mcp.tool()
+async def show_constitution() -> dict[str, Any]:
+    """Return the full analyst constitution — the living rulebook that
+    flows into every surface_ideas, specialist dive (Opus), and memo
+    prompt. This is what the analyst reads to decide what's worth its
+    attention and what to skip. Curate it via append_principle /
+    remove_principle / replace_constitution.
+
+    Distinct from steering (ephemeral rolling nudges): the constitution
+    is canonical and persists until you edit it."""
+    settings = get_settings()
+    text = read_constitution(settings.vault_root)
+    return {
+        "ok": True,
+        "path": str(constitution_path(settings.vault_root).relative_to(settings.vault_root)),
+        "content": text or "(empty — use append_principle to add rules)",
+    }
+
+
+@mcp.tool()
+async def append_principle(
+    rule: str, section: str = "What to favor"
+) -> dict[str, Any]:
+    """Append a principle (rule / bullet) to the analyst constitution.
+    The constitution flows into every Opus/Sonnet prompt so refinements
+    here ripple across all research.
+
+    Examples:
+      append_principle("Skip merger-arb setups with < 5% upside — low
+        alpha, not our edge", section="What to skip")
+      append_principle("Favor micro-caps $50M-$500M where primary
+        research reliably beats consensus", section="What to favor")
+      append_principle("Always surface downside symmetrically in every
+        memo — no cheerleading", section="Style + conduct")
+
+    Creates the section if it doesn't exist. Exact-duplicate bullets are
+    dedup'd. Section names are free-form — typical ones are
+    'What to skip', 'What to favor', 'Style + conduct', 'Universe',
+    'Process'."""
+    from praxis_core.vault.constitution import append_principle as _append
+
+    settings = get_settings()
+    path = _append(settings.vault_root, rule, section=section)
+    return {
+        "ok": True,
+        "path": str(path.relative_to(settings.vault_root)),
+        "section": section,
+    }
+
+
+@mcp.tool()
+async def remove_principle_from_constitution(substring: str) -> dict[str, Any]:
+    """Remove every constitution bullet whose text contains `substring`
+    (case-insensitive). Returns the number of bullets removed.
+
+    Example:
+      remove_principle_from_constitution("merger arb") — drops any rule
+        mentioning merger arb."""
+    settings = get_settings()
+    removed, path = remove_principle(settings.vault_root, substring)
+    return {
+        "ok": True,
+        "removed": removed,
+        "path": str(path.relative_to(settings.vault_root)),
+    }
+
+
+@mcp.tool()
+async def rewrite_constitution(new_markdown: str) -> dict[str, Any]:
+    """Full rewrite of the constitution with `new_markdown` content.
+    Backs up the previous version to _analyst/constitution.backup-*.md
+    before overwriting. Use when you want to reorganize sections or
+    rewrite multiple principles at once; otherwise append_principle /
+    remove_principle are safer."""
+    settings = get_settings()
+    path = replace_constitution(settings.vault_root, new_markdown)
+    return {
+        "ok": True,
+        "path": str(path.relative_to(settings.vault_root)),
+        "chars": len(new_markdown),
+    }
 
 
 @mcp.tool()

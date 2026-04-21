@@ -16,6 +16,7 @@ from praxis_core.schemas.task_types import TaskModel
 from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import now_utc
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.constitution import constitution_prompt_block
 from services.dispatcher.investability import parse_investability
 
 log = get_logger("handlers.synthesize_memo")
@@ -336,7 +337,10 @@ If the notes are thin, the memo should be short and decisively Neutral or Too Ha
 """
 
     schema = read_vault_schema(ctx.vault_root)
-    system = SYSTEM_PROMPT + ("\n\n## Vault schema\n" + schema if schema else "")
+    constitution = constitution_prompt_block(ctx.vault_root)
+    system = SYSTEM_PROMPT + (
+        ("\n\n" + constitution) if constitution else ""
+    ) + ("\n\n## Vault schema\n" + schema if schema else "")
 
     result = await run_llm(
         system_prompt=system,

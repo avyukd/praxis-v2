@@ -21,6 +21,7 @@ from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_date_str, et_iso
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.constitution import constitution_prompt_block
 from praxis_core.vault.writer import atomic_write
 
 log = get_logger("handlers.analyze_filing")
@@ -243,8 +244,12 @@ Content:
 
 Respond with valid JSON per the schema."""
 
+    constitution = constitution_prompt_block(ctx.vault_root)
+    analysis_system = ANALYSIS_SYSTEM_PROMPT + (
+        ("\n\n" + constitution) if constitution else ""
+    )
     analysis_result = await run_llm(
-        system_prompt=ANALYSIS_SYSTEM_PROMPT,
+        system_prompt=analysis_system,
         user_prompt=analysis_user_prompt,
         model=TaskModel.SONNET,
         max_budget_usd=SONNET_ANALYSIS_BUDGET_USD,

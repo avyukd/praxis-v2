@@ -45,6 +45,7 @@ from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.capacity import get_pool_capacity
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
+from praxis_core.vault.constitution import constitution_prompt_block
 from praxis_core.vault.followups import load_open_followups
 from praxis_core.vault.section_append import append_to_section
 from praxis_core.vault.steering import recent_steering
@@ -398,7 +399,7 @@ def _pick_mode(available_modes: set[str] | None = None) -> str:
 
 
 async def _build_recent_signals_run(
-    ctx: HandlerContext, steering: str, focus: str
+    ctx: HandlerContext, steering: str, focus: str, constitution: str
 ) -> tuple[str, str, TaskModel] | None:
     async with session_scope() as session:
         signals = await _recent_signals(session)
@@ -413,12 +414,13 @@ async def _build_recent_signals_run(
         f"Cross-check the following inputs and emit up to {MAX_IDEAS_PER_BATCH} ranked ideas.\n\n{body}",
         steering,
         focus,
+        constitution=constitution,
     )
     return RECENT_SIGNALS_PROMPT, user, TaskModel.SONNET
 
 
 async def _build_question_pursuit_run(
-    ctx: HandlerContext, steering: str, focus: str
+    ctx: HandlerContext, steering: str, focus: str, constitution: str
 ) -> tuple[str, str, TaskModel] | None:
     followups = load_open_followups(ctx.vault_root, limit=40)
     if not followups:
@@ -442,12 +444,13 @@ async def _build_question_pursuit_run(
         "that would advance the most fruitful ones.\n\n" + "\n".join(lines),
         steering,
         focus,
+        constitution=constitution,
     )
     return QUESTION_PURSUIT_PROMPT, user, TaskModel.SONNET
 
 
 async def _build_stale_coverage_run(
-    ctx: HandlerContext, steering: str, focus: str
+    ctx: HandlerContext, steering: str, focus: str, constitution: str
 ) -> tuple[str, str, TaskModel] | None:
     tickers = _ticker_universe(ctx.vault_root)
     if not tickers:
@@ -468,12 +471,13 @@ async def _build_stale_coverage_run(
         "from a refresh dive.\n\n" + "\n".join(lines),
         steering,
         focus,
+        constitution=constitution,
     )
     return STALE_COVERAGE_PROMPT, user, TaskModel.HAIKU
 
 
 async def _build_theme_deepening_run(
-    ctx: HandlerContext, steering: str, focus: str
+    ctx: HandlerContext, steering: str, focus: str, constitution: str
 ) -> tuple[str, str, TaskModel] | None:
     themes = _active_themes(ctx.vault_root)
     if not themes:
@@ -500,12 +504,13 @@ async def _build_theme_deepening_run(
         "sharpen or reshape the theme.\n\n" + "\n".join(lines),
         steering,
         focus,
+        constitution=constitution,
     )
     return THEME_DEEPENING_PROMPT, user, TaskModel.SONNET
 
 
 async def _build_random_exploration_run(
-    ctx: HandlerContext, steering: str, focus: str
+    ctx: HandlerContext, steering: str, focus: str, constitution: str
 ) -> tuple[str, str, TaskModel] | None:
     tickers = _ticker_universe(ctx.vault_root)
     if not tickers:
@@ -520,12 +525,17 @@ async def _build_random_exploration_run(
         "are interesting right now.\n\n" + "\n".join(lines),
         steering,
         focus,
+        constitution=constitution,
     )
     return RANDOM_EXPLORATION_PROMPT, user, TaskModel.HAIKU
 
 
-def _wrap_user_prompt(mode: str, body: str, steering: str, focus: str) -> str:
+def _wrap_user_prompt(
+    mode: str, body: str, steering: str, focus: str, constitution: str = ""
+) -> str:
     parts = [f"SURFACE IDEAS (mode: {mode})"]
+    if constitution:
+        parts.append(constitution)
     if steering:
         parts.append(steering)
     if focus:
@@ -548,16 +558,20 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
     vault_root = ctx.vault_root
 
     steering = recent_steering(vault_root, max_entries=10)
+    constitution = constitution_prompt_block(vault_root)
     focus = payload.focus or ""
 
     chosen = _pick_mode()
-    log.info("surface.mode_picked", mode=chosen, task_id=ctx.task_id)
+    log.info(
+        "surface.mode_picked",
+        mode=chosen,
+        task_id=ctx.task_id,
+        constitution_chars=len(constitution),
+        steering_chars=len(steering),
+    )
 
-    built = await _MODE_BUILDERS[chosen](ctx, steering, focus)
+    built = await _MODE_BUILDERS[chosen](ctx, steering, focus, constitution)
     if built is None:
-        # Chosen mode had no inputs; fall back to whichever mode has data,
-        # preferring cheaper modes first so we don't burn Sonnet on a
-        # legit-empty run. If all fall through, exit clean.
         fallback_order = [
             "random_exploration",
             "stale_coverage",
@@ -568,7 +582,7 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
         for m in fallback_order:
             if m == chosen:
                 continue
-            built = await _MODE_BUILDERS[m](ctx, steering, focus)
+            built = await _MODE_BUILDERS[m](ctx, steering, focus, constitution)
             if built is not None:
                 log.info("surface.mode_fallback", original=chosen, used=m)
                 chosen = m
