@@ -1,5 +1,33 @@
 # 4-20 Overnight Plan
 
+## Overnight tally (final — 2026-04-21 ~03:00 ET)
+
+Shipped:
+- **Phase 0 vault memory** (e1e3723) — search_vault upgraded to
+  two-stage ranked
+- **Phases 1-6 research engine** (73064ea) — `research_query`
+  entrypoint, 6 new task types, 4 new MCP tools, screening bridges
+  to existing dives
+- **A.1 synthesize_memo skeleton-retry cap** (0bc6593) —
+  ship-critical for tomorrow's pipelines
+- **A.2 + A.3 + A.5 cleanup** (36f2c1f) — F811 shadow, symlink
+  safety, unused import
+- **+53 unit tests** — suite now 332 green (from 279)
+
+Explicitly skipped:
+- A.4 UNKNOWN ticker routing — manual-ingest only, not on the
+  Monday pipeline critical path
+- A.2.7 dashboard XSS — off ship path, post-Monday
+- F.8 Phase 7 refresh loop — post-Monday
+
+System state check before wrap-up still blocked on Anthropic
+upstream throttle; probe mechanism post-fix keeps cycling
+correctly, queue waits without burning cost.
+
+---
+
+
+
 Tight ship-day TODO. Re-verified against HEAD on 2026-04-21 —
 Codex's audit (`scratch/codex-4-20-review.md`) was produced earlier
 and a lot of it is already fixed. Only items that ACTUALLY still exist
@@ -20,7 +48,10 @@ Status:
 
 ## Section A — Real work, re-verified
 
-### A.1 `[ ]` `synthesize_memo` has no wall-clock cap on transient retries 🟠
+### A.1 `[x]` `synthesize_memo` has no wall-clock cap on transient retries 🟠
+**Shipped** commit `0bc6593`. SKELETON_WALLCLOCK_CAP_S=4h; skeletons
+older than cap fall through to degraded memo instead of transient loop.
+5 unit tests added.
 **Most important correctness fix.**
 
 - **Why**: `release_task` backoff fix + `transient=True` means
@@ -43,7 +74,10 @@ Status:
 - **Risk**: 4h is arbitrary, make it a module-level constant.
 - **Est**: 45 min.
 
-### A.2 `[ ]` MCP `append_principle` shadows imported symbol (F811) 🟠
+### A.2 `[x]` MCP `append_principle` shadows imported symbol (F811) 🟠
+**Shipped** commit `36f2c1f`. Renamed MCP tool to `add_principle`;
+module-level import of `append_principle` from
+`praxis_core.vault.constitution` is now called directly.
 - **Why**: `services/mcp/server.py:28` imports `append_principle` from
   `praxis_core.vault.constitution`; line 201 redefines it as MCP tool.
   Line 220 works around with `from ... import ... as _append`. Bad
@@ -61,7 +95,9 @@ Status:
   (zero-cost for Avyuk since day-zero feature).
 - **Est**: 15 min.
 
-### A.3 `[ ]` `file_to_vault` no symlink-resolved path safety 🔒
+### A.3 `[x]` `file_to_vault` no symlink-resolved path safety 🔒
+**Shipped** commit `36f2c1f`. Parent `resolve()` + `relative_to`
+check now catches symlink escapes.
 - **Why**: `relative_to(vault_root)` is lexical — a symlink inside the
   vault pointing outside lets a caller write arbitrary paths. Low
   exposure (only Avyuk) but cheap.
@@ -96,7 +132,8 @@ Status:
   break the link. Grep first.
 - **Est**: 45 min.
 
-### A.5 `[ ]` Drop unused `SYSTEM_PROMPT` import in surface_ideas 🟡
+### A.5 `[x]` Drop unused `SYSTEM_PROMPT` import in surface_ideas 🟡
+**Shipped** commit `36f2c1f`.
 - **Why**: Orphan after the modal refactor (mode-specific prompts
   replaced single `SYSTEM_PROMPT`).
 - **Scope**: One line in `handlers/surface_ideas.py:31`.
@@ -190,7 +227,10 @@ Phase 7 (refresh maintenance loop) deferred post-Monday.
 
 ### F.1 `[x]` Section F wired into the overnight agenda
 
-### F.0 `[ ]` Phase 0 — vault memory / research search layer
+### F.0 `[x]` Phase 0 — vault memory / research search layer
+**Shipped** commit `e1e3723`. `praxis_core/vault/memory.py` with
+two-stage keyword + Haiku rerank. Observer `search_vault` MCP tool
+upgraded to use it. 13 unit tests.
 **Load-bearing. Ships first. Every downstream phase calls it.**
 
 Files:
@@ -228,7 +268,10 @@ Tests:
   stage 2 rerank with stubbed LLM, scope filter, cache behavior,
   fallback when Haiku rate-limited.
 
-### F.2 `[ ]` Phase 1 — freeform entrypoint + planner
+### F.2 `[x]` Phase 1 — freeform entrypoint + planner
+**Shipped** commit `73064ea`. `orchestrate_research` handler +
+system prompt, `research_query` MCP tool, all 6 new TaskType enum
+entries + payload classes + resource-key extensions.
 Files:
 - `praxis_core/schemas/task_types.py` — add `ORCHESTRATE_RESEARCH`,
   `GATHER_SOURCES`, `COMPILE_RESEARCH_NODE`, `ANSWER_QUESTION`,
@@ -264,7 +307,10 @@ Design decisions (made tonight, not up for discussion mid-build):
   reads `constitution_prompt_block` + `recent_steering` — flows
   naturally into broad-topic research.
 
-### F.3 `[ ]` Phase 2 — persistent retrieval
+### F.3 `[x]` Phase 2 — persistent retrieval
+**Shipped** commit `73064ea`. `praxis_core/vault/sources.py` with
+`persist_web_source`, `handlers/gather_sources.py` with Sonnet +
+WebSearch/WebFetch/curl, `persist_source` MCP tool. 7 unit tests.
 Files:
 - `praxis_core/vault/sources.py` — `persist_web_source(url, title,
   body_text, site=None, publish_date=None)` — writes to
@@ -276,7 +322,10 @@ Files:
 - `handlers/prompts/gather_sources.py` — prompt.
 - Validator: at least 1 source persisted, all source paths resolve.
 
-### F.4 `[ ]` Phase 3 — theme/question/concept compilation
+### F.4 `[x]` Phase 3 — theme/question/concept compilation
+**Shipped** commit `73064ea`. `handlers/compile_research_node.py`
+pre-writes skeleton scaffolds per node_type, then Sonnet Edits
+in place. Validator checks for `## Evidence` section.
 Files:
 - `handlers/compile_research_node.py` — non-company analogue of
   `compile_to_wiki`. Modes: `theme`, `question`, `concept`. Reads
@@ -287,7 +336,10 @@ Files:
 - Validator: file exists, frontmatter valid, evidence section
   present, ≥1 source wikilink.
 
-### F.5 `[ ]` Phase 4 — question answering
+### F.5 `[x]` Phase 4 — question answering
+**Shipped** commit `73064ea`. `handlers/answer_question.py`, budget
+scales with research_priority. Validator: status transitions + answer
+section populated.
 Files:
 - `handlers/answer_question.py` — reads question body + linked
   sources + related themes, writes answer section, transitions
@@ -297,7 +349,11 @@ Files:
 - Validator: status is updated, answer body OR partial-rationale
   exists, ≥1 citation.
 
-### F.6 `[ ]` Phase 5 — candidate screening
+### F.6 `[x]` Phase 5 — candidate screening
+**Shipped** commit `73064ea`. `handlers/screen_candidate_companies.py`
+ranks via Sonnet + fundamentals MCP; enqueues `orchestrate_dive`
+for top-N deep_dive verdicts under a child investigation referencing
+the parent via `entry_nodes`.
 Files:
 - `handlers/screen_candidate_companies.py` — ranks candidate
   tickers by exposure purity + investability + coverage-freshness.
@@ -308,7 +364,11 @@ Files:
 - Validator: verdicts present for every candidate, justification
   per verdict.
 
-### F.7 `[ ]` Phase 6 — cross-cutting synthesis
+### F.7 `[x]` Phase 6 — cross-cutting synthesis
+**Shipped** commit `73064ea`. `handlers/synthesize_crosscut_memo.py`
+uses Opus, gates on sibling task completion with 4h wall-clock cap
+(same pattern as A.1). Validator checks memo has all required
+sections (Thesis / Evidence / Equity ranking / Known vs uncertain).
 Files:
 - `handlers/synthesize_crosscut_memo.py` — Opus. Reads the
   investigation's themes, questions, compiled answers, gathered
@@ -324,7 +384,12 @@ Files:
 ### F.8 `[ ]` Phase 7 — refresh/maintenance loop (deferred)
 Post-Monday. `refresh_research_node` + scheduler wiring.
 
-### F.9 `[ ]` Tests (phased with each handler)
+### F.9 `[x]` Tests (phased with each handler)
+Shipped: test_vault_memory (13), test_research_payloads (10),
+test_orchestrate_research_parsing (7), test_persist_web_source (7),
+test_research_validators (11), test_synthesize_memo_skeleton_cap (5).
+Total +53 tests; full unit suite now 332 green.
+Integration smoke deferred — needs Anthropic upstream clear.
 - `tests/unit/test_research_payloads.py`
 - `tests/unit/test_orchestrate_research_parsing.py`
 - `tests/unit/test_persist_web_source.py`
@@ -336,8 +401,9 @@ Post-Monday. `refresh_research_node` + scheduler wiring.
   beneficiaries")` — will not run live tonight due to Anthropic
   throttle, but enqueue + task-row assertions should work.
 
-### F.10 `[ ]` Commit
-Single commit per phase to keep the diff reviewable.
+### F.10 `[x]` Commits
+Landed as: e1e3723 (Phase 0), 73064ea (Phases 1-6 + validators +
+tests + MCP tools), 0bc6593 (A.1 cap), 36f2c1f (A.2+A.3+A.5).
 
 ---
 
