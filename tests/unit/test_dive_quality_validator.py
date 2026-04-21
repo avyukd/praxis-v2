@@ -146,6 +146,25 @@ def test_word_budget_scales_with_priority():
     assert _check_word_budget("/x/dive.md", content, 10) == []
 
 
+def test_word_budget_ignores_frontmatter_related_and_sources():
+    analysis = "word " * 1900
+    content = (
+        "---\n"
+        "type: dive\n"
+        "specialist: business-moat\n"
+        "ticker: BTO\n"
+        "links: [companies/BTO/notes]\n"
+        "---\n\n"
+        "# BTO — Business & Moat\n\n"
+        f"{analysis}\n\n"
+        "## Related\n"
+        + ("- [[companies/BTO/notes.md]]\n" * 40)
+        + "\n## Sources consulted\n"
+        + ("- `mcp__fundamentals__company_overview(BTO)` → marketCap details\n" * 60)
+    )
+    assert _check_word_budget("/x/dive.md", content, 5) == []
+
+
 # -- end-to-end validator wiring --
 
 

@@ -121,6 +121,8 @@ number with no source.
 - No preambles or "in conclusion" sections.
 - Tables over prose for comparable data.
 - If a sentence can be deleted without losing insight, delete it.
+- Keep `## Related` and `## Sources consulted` terse and list-like; they
+  are metadata, not mini-essays.
 - **Respect the word budget** given in your task — the validator
   rejects dives that exceed it materially.
 

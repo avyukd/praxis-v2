@@ -45,6 +45,26 @@ def _check_file_exists(path: Path) -> tuple[str, bool]:
     return (str(path), path.exists() and path.is_file())
 
 
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*\n?", re.DOTALL)
+
+
+def _budgeted_dive_text(content: str) -> str:
+    """Count only the analytical body for word-budget enforcement.
+
+    YAML frontmatter, graph metadata (`## Related`), and retrieval audit
+    trail (`## Sources consulted`) are required scaffolding, but they are
+    not the core analysis the budget is meant to constrain.
+    """
+    trimmed = _FRONTMATTER_RE.sub("", content, count=1)
+    for heading in ("Related", "Sources consulted"):
+        trimmed = re.sub(
+            rf"(?ims)^##\s+{re.escape(heading)}\s*$.*?(?=^##\s+|\Z)",
+            "",
+            trimmed,
+        )
+    return trimmed
+
+
 def _check_pydantic_file(
     path: Path, model: type, *, json_file: bool = True
 ) -> tuple[str, str | None]:
@@ -417,14 +437,14 @@ def _check_word_budget(
     from praxis_core.research.budget import ResearchBudget
 
     budget = ResearchBudget.from_priority(research_priority)
-    word_count = len(content.split())
+    word_count = len(_budgeted_dive_text(content).split())
     cap = int(budget.specialist_words * 1.3)
     if word_count > cap:
         return [
             ValidationMalformed(
                 path=path_str,
                 reason=(
-                    f"dive exceeds word budget ({word_count} words > "
+                    f"dive analysis exceeds word budget ({word_count} words > "
                     f"{cap} = 1.3x {budget.depth_label})"
                 ),
             )
