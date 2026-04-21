@@ -13,6 +13,7 @@ from services.dispatcher import worker
 from services.dispatcher.worker import (
     requeue_canceled_task,
     requeue_interrupted_llm_task,
+    retry_payload_patch,
     validation_failure_reason,
 )
 
@@ -41,6 +42,31 @@ def test_validation_failure_reason_uses_missing_paths_when_present() -> None:
         validation_failure_reason(validation)
         == "artifacts missing: ['/tmp/company/dives/capital-allocation.md']"
     )
+
+
+def test_retry_payload_patch_targets_dive_validation_failures() -> None:
+    task = cast(
+        Any,
+        SimpleNamespace(
+            type="dive_business_moat",
+            payload={"ticker": "TRAX", "_retry_count": 1},
+        ),
+    )
+
+    patch = retry_payload_patch(
+        task,
+        "artifacts malformed: /tmp/company/dives/business-moat.md: need >=1 web retrieval",
+    )
+
+    assert patch == {
+        "_retry_reason": "artifacts malformed: /tmp/company/dives/business-moat.md: need >=1 web retrieval",
+        "_retry_count": 2,
+    }
+
+
+def test_retry_payload_patch_ignores_non_dive_failures() -> None:
+    task = cast(Any, SimpleNamespace(type="surface_ideas", payload={}))
+    assert retry_payload_patch(task, "artifacts malformed: x") is None
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import traceback
 import uuid
 from collections.abc import Coroutine
@@ -79,6 +80,26 @@ async def requeue_interrupted_llm_task(
     )
     log.warning("task.interrupted_requeued", task_id=str(task.id), task_type=task.type)
     return True
+
+
+def retry_payload_patch(task: Task, error: str) -> dict[str, object] | None:
+    """Attach targeted repair guidance to retried artifact-producing tasks."""
+    if not task.type.startswith("dive_"):
+        return None
+    if not (
+        error.startswith("artifacts malformed:") or error.startswith("artifacts missing:")
+    ):
+        return None
+    prior_count = 0
+    if isinstance(task.payload, dict):
+        try:
+            prior_count = int(task.payload.get("_retry_count", 0))
+        except (TypeError, ValueError):
+            prior_count = 0
+    return {
+        "_retry_reason": error[:1500],
+        "_retry_count": prior_count + 1,
+    }
 
 
 async def _heartbeat_loop(task_id: uuid.UUID, worker_id: str, stop: asyncio.Event) -> None:
@@ -424,12 +445,20 @@ async def _handle_failure(session, task: Task, error: str) -> None:
         await mark_failed(session, task.id, error)
         from sqlalchemy import text
 
+        payload_patch = retry_payload_patch(task, error)
         await session.execute(
             text(
                 "UPDATE tasks SET status = 'queued', lease_holder = NULL, "
-                "lease_expires_at = NULL, last_error = :err WHERE id = :tid"
+                "lease_expires_at = NULL, last_error = :err, "
+                "payload = CASE WHEN :payload_patch IS NULL THEN payload "
+                "ELSE COALESCE(payload, '{}'::jsonb) || CAST(:payload_patch AS jsonb) END "
+                "WHERE id = :tid"
             ),
-            {"err": error[:2000], "tid": task.id},
+            {
+                "err": error[:2000],
+                "tid": task.id,
+                "payload_patch": json.dumps(payload_patch) if payload_patch is not None else None,
+            },
         )
         await emit_event(
             "dispatcher.worker",

@@ -13,10 +13,9 @@ gets up to $8, a Quick Screen caps at $1.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import json
 import re
+from pathlib import Path
 
 from handlers import HandlerContext, HandlerResult
 from handlers._common import DIVE_ALLOWED_TOOLS, read_vault_schema, run_llm
@@ -107,6 +106,8 @@ async def run_specialist_dive(
         raise ValueError(f"{ctx.task_type} missing ticker")
     investigation_handle = ctx.payload.get("investigation_handle") or ""
     investigation_id = ctx.payload.get("investigation_id")
+    retry_reason = str(ctx.payload.get("_retry_reason") or "").strip()
+    retry_count = ctx.payload.get("_retry_count")
 
     priority = _priority_from_ctx(ctx)
     budget = ResearchBudget.from_priority(priority)
@@ -159,6 +160,15 @@ is why you have web access):
   - Investigation file: {inv_path or "(none)"}
 
 {focus}
+
+{"Previous validation failure to repair:\n"
+ f"  - Attempt: {retry_count}\n"
+ f"  - Failure: {retry_reason}\n"
+ "Repair the existing file in place. Preserve any good analysis, but explicitly "
+ "fix the validation issue above before finishing. If the failure mentions missing "
+ "web retrieval, add at least one literal `WebFetch(...)`, `WebSearch(...)`, or "
+ "`curl ...` entry under `## Sources consulted`.\n"
+ if retry_reason else ""}
 
 Process (non-negotiable — the validator checks for proof of each step):
 
