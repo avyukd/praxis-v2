@@ -59,13 +59,17 @@ async def _dispatch_tick(pool: WorkerPool) -> int:
     async with session_scope() as session:
         can_dispatch, snap = await rate_limiter.can_dispatch(session)
 
-    if not can_dispatch and snap.status == "probing":
-        # Only probes dispatched (handled above)
-        return 0
-    if not can_dispatch:
+    if not can_dispatch and snap.status != "probing":
         return 0
 
-    # 3. Fill available slots, respecting resource locks
+    # 3. Fill available slots, respecting resource locks. In probing state,
+    # only claim rate_limit_probe tasks — everything else waits for the
+    # probe to flip state back to 'clear'. Before this gate, probes got
+    # enqueued by _maybe_launch_probe but never claimed, so the system
+    # stayed stuck in 'probing' forever after each real rate-limit hit.
+    probing = snap.status == "probing"
+    allowed_types = ["rate_limit_probe"] if probing else None
+
     assigned = 0
     available = pool.available_slots()
     if available <= 0:
@@ -75,18 +79,16 @@ async def _dispatch_tick(pool: WorkerPool) -> int:
         excluded_resources = pool.running_resource_keys()
         async with session_scope() as session:
             worker_id = pool.alloc_worker_id()
-            # Undo alloc if no task found
             task = await claim_next_task(
                 session,
                 worker_id=worker_id,
                 excluded_resource_keys=excluded_resources or None,
+                allowed_types=allowed_types,
             )
             if task is None:
-                # Rewind seq so we don't burn a worker id
                 pool._worker_seq -= 1
                 break
 
-        # Release the worker id back — submit() allocates its own
         pool._worker_seq -= 1
         await pool.submit(task, execute_task(task, pool.alloc_worker_id()))
         assigned += 1
