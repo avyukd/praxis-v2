@@ -83,8 +83,8 @@ async def _dispatch_tick(pool: WorkerPool) -> int:
 
     for _ in range(available):
         excluded_resources = pool.running_resource_keys()
+        worker_id = pool.alloc_worker_id()
         async with session_scope() as session:
-            worker_id = pool.alloc_worker_id()
             task = await claim_next_task(
                 session,
                 worker_id=worker_id,
@@ -92,11 +92,9 @@ async def _dispatch_tick(pool: WorkerPool) -> int:
                 allowed_types=allowed_types,
             )
             if task is None:
-                pool._worker_seq -= 1
                 break
 
-        pool._worker_seq -= 1
-        await pool.submit(task, execute_task(task, pool.alloc_worker_id()))
+        await pool.submit(task, execute_task(task, worker_id), worker_id=worker_id)
         assigned += 1
 
     return assigned

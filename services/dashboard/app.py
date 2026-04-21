@@ -298,11 +298,15 @@ button.refresh-btn{background:#333;color:#eee;border:1px solid #555;padding:.3em
 <script>
 async function j(u){const r=await fetch(u);return r.json();}
 function el(id){return document.getElementById(id);}
+function esc(s){
+  if(s===null||s===undefined) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 function renderHealth(hb){
   const rows=hb.heartbeats.map(h=>{
     const c=h.stale?'red':(h.age_s>60?'yellow':'green');
-    return `<tr><td>${h.component}</td><td class='${c}'>${h.age_s}s</td><td>${JSON.stringify(h.status||{})}</td></tr>`;
+    return `<tr><td>${esc(h.component)}</td><td class='${c}'>${esc(h.age_s)}s</td><td>${esc(JSON.stringify(h.status||{}))}</td></tr>`;
   }).join('');
   return `<table><tr><th>Component</th><th>Age</th><th>Status</th></tr>${rows}</table>`;
 }
@@ -310,14 +314,14 @@ function renderHealth(hb){
 function renderTasks(t){
   const statuses=Object.keys(t.by_status_type||{}).sort();
   const rows=statuses.map(s=>{
-    const cells=Object.entries(t.by_status_type[s]).map(([k,v])=>`${k}:${v}`).join(' ');
-    return `<tr><td>${s}</td><td>${cells}</td></tr>`;
+    const cells=Object.entries(t.by_status_type[s]).map(([k,v])=>`${esc(k)}:${esc(v)}`).join(' ');
+    return `<tr><td>${esc(s)}</td><td>${cells}</td></tr>`;
   }).join('');
-  const oldest=(t.oldest_queued_by_type||[]).map(o=>`${o.type}:${Math.round(o.oldest_age_s/60)}m`).join(' ') || '-';
+  const oldest=(t.oldest_queued_by_type||[]).map(o=>`${esc(o.type)}:${Math.round(o.oldest_age_s/60)}m`).join(' ') || '-';
   let failed='';
   if((t.recent_failed||[]).length){
     failed='<h3 style="color:#f66">Recent failures</h3><table><tr><th>type</th><th>error</th></tr>'+
-      t.recent_failed.map(f=>`<tr><td>${f.type}</td><td class='red'>${f.last_error||''}</td></tr>`).join('')+'</table>';
+      t.recent_failed.map(f=>`<tr><td>${esc(f.type)}</td><td class='red'>${esc(f.last_error||'')}</td></tr>`).join('')+'</table>';
   }
   return `<table><tr><th>Status</th><th>Types</th></tr>${rows}</table>
   <p>Oldest queued: ${oldest}</p>${failed}`;
@@ -325,37 +329,37 @@ function renderTasks(t){
 
 function renderRL(r){
   const c=r.status==='clear'?'green':(r.status==='probing'?'yellow':'red');
-  return `<div class='tile ${c}'>${r.status}</div> hits: ${r.consecutive_hits}${r.limited_until_ts?' until '+r.limited_until_ts:''}`;
+  return `<div class='tile ${c}'>${esc(r.status)}</div> hits: ${esc(r.consecutive_hits)}${r.limited_until_ts?' until '+esc(r.limited_until_ts):''}`;
 }
 
 function renderCost(c){
-  return `<p>Total today: $${(c.total_cost_usd||0).toFixed(4)} · tokens in: ${c.total_tokens_in} · tokens out: ${c.total_tokens_out}</p>`+
+  return `<p>Total today: $${(c.total_cost_usd||0).toFixed(4)} · tokens in: ${esc(c.total_tokens_in)} · tokens out: ${esc(c.total_tokens_out)}</p>`+
     '<table><tr><th>type</th><th>count</th><th>cost</th><th>in</th><th>out</th></tr>'+
-    Object.entries(c.by_type||{}).map(([k,v])=>`<tr><td>${k}</td><td>${v.count}</td><td>$${v.cost_usd.toFixed(4)}</td><td>${v.tokens_in}</td><td>${v.tokens_out}</td></tr>`).join('')+'</table>';
+    Object.entries(c.by_type||{}).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v.count)}</td><td>$${v.cost_usd.toFixed(4)}</td><td>${esc(v.tokens_in)}</td><td>${esc(v.tokens_out)}</td></tr>`).join('')+'</table>';
 }
 
 function renderInv(inv){
   if(!inv.length) return '<p class="grey">No investigations yet.</p>';
   return '<table><tr><th>handle</th><th>status</th><th>scope</th><th>hypothesis</th><th>last progress</th></tr>'+
-    inv.map(i=>`<tr><td>${i.handle}</td><td>${i.status}</td><td>${i.scope}</td><td>${i.hypothesis||''}</td><td>${i.last_progress_at||''}</td></tr>`).join('')+'</table>';
+    inv.map(i=>`<tr><td>${esc(i.handle)}</td><td>${esc(i.status)}</td><td>${esc(i.scope)}</td><td>${esc(i.hypothesis||'')}</td><td>${esc(i.last_progress_at||'')}</td></tr>`).join('')+'</table>';
 }
 
 function renderSignals(sg){
   if(!sg.length) return '<p class="grey">No signals yet.</p>';
   return '<table><tr><th>fired</th><th>ticker</th><th>urgency</th><th>type</th><th>title</th></tr>'+
-    sg.map(s=>`<tr><td>${s.fired_at}</td><td>${s.ticker||'-'}</td><td>${s.urgency}</td><td>${s.signal_type}</td><td>${(s.payload||{}).title||''}</td></tr>`).join('')+'</table>';
+    sg.map(s=>`<tr><td>${esc(s.fired_at)}</td><td>${esc(s.ticker||'-')}</td><td>${esc(s.urgency)}</td><td>${esc(s.signal_type)}</td><td>${esc((s.payload||{}).title||'')}</td></tr>`).join('')+'</table>';
 }
 
 function renderEvents(ev){
   return '<table><tr><th>ts</th><th>component</th><th>type</th><th>payload</th></tr>'+
-    ev.map(e=>`<tr><td>${e.ts}</td><td>${e.component}</td><td>${e.event_type}</td><td><pre>${JSON.stringify(e.payload||{})}</pre></td></tr>`).join('')+'</table>';
+    ev.map(e=>`<tr><td>${esc(e.ts)}</td><td>${esc(e.component)}</td><td>${esc(e.event_type)}</td><td><pre>${esc(JSON.stringify(e.payload||{}))}</pre></td></tr>`).join('')+'</table>';
 }
 
 function renderDL(dl){
   if(!dl.length) return '<p class="grey">No dead letters.</p>';
   return `<p class='red'>${dl.length} dead-lettered task(s) — use MCP requeue_dead_letter(id) after fixing root cause.</p>`+
     '<table><tr><th>id</th><th>type</th><th>failed</th><th>attempts</th><th>error</th></tr>'+
-    dl.map(d=>`<tr><td>${d.id.slice(0,8)}</td><td>${d.task_type||'?'}</td><td>${d.failed_at}</td><td>${d.attempts||'?'}</td><td class='red'>${(d.final_error||'').slice(0,200)}</td></tr>`).join('')+'</table>';
+    dl.map(d=>`<tr><td>${esc(d.id.slice(0,8))}</td><td>${esc(d.task_type||'?')}</td><td>${esc(d.failed_at)}</td><td>${esc(d.attempts||'?')}</td><td class='red'>${esc((d.final_error||'').slice(0,200))}</td></tr>`).join('')+'</table>';
 }
 
 let inflight=0;
@@ -378,7 +382,7 @@ async function refresh(){
     el('events').innerHTML=renderEvents(ev);
     el('refreshed').innerText='refreshed '+new Date().toLocaleTimeString()+` (${Date.now()-started}ms)`;
   }catch(e){
-    el('refreshed').innerHTML='<span class="stale">ERROR: '+e+' — showing stale data</span>';
+    el('refreshed').innerHTML='<span class="stale">ERROR: '+esc(e)+' — showing stale data</span>';
   }finally{
     inflight--;
   }

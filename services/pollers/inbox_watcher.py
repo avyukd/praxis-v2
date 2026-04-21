@@ -31,6 +31,12 @@ def _slugify(name: str) -> str:
     return base or "unnamed"
 
 
+def _yaml_quote(s: str) -> str:
+    """Single-quote a YAML scalar. A filename like "a\\nowned: true.md" would
+    otherwise break out of the value line and inject arbitrary keys."""
+    return "'" + s.replace("'", "''").replace("\n", " ").replace("\r", " ") + "'"
+
+
 async def _process_file(file_path: Path) -> bool:
     settings = get_settings()
     if file_path.suffix.lower() not in SUPPORTED_EXTS:
@@ -74,14 +80,16 @@ async def _process_file(file_path: Path) -> bool:
             pass
         return False
 
-    # Wrap content with frontmatter marker so downstream tasks can identify it
+    # Wrap content with frontmatter marker so downstream tasks can identify it.
+    # YAML-quote original_name — user-controlled filename can otherwise break
+    # out of the scalar and inject arbitrary frontmatter keys.
     body = content
     if not body.startswith("---"):
         body = (
             "---\n"
             "type: source\n"
             f"source_kind: manual\n"
-            f"original_name: {file_path.name}\n"
+            f"original_name: {_yaml_quote(file_path.name)}\n"
             f"ingested_at: {et_iso(dt)}\n"
             "---\n\n" + body
         )

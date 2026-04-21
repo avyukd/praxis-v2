@@ -13,19 +13,21 @@ log = get_logger("handlers.refresh_index")
 
 
 def _collect_nodes(vault_root: Path) -> dict[str, list[str]]:
-    def _list(dir_path: Path, pattern: str = "*.md") -> list[str]:
+    def _list(dir_path: Path) -> list[str]:
+        """Top-level *.md plus one level of <dir>/index.md stubs.
+
+        Some nodes (themes, concepts) are single files; others (companies,
+        sometimes investigations) are directories with a stub file inside.
+        We want both in the index.
+        """
         if not dir_path.exists():
             return []
-        return sorted(p.relative_to(vault_root).as_posix() for p in dir_path.glob(pattern))
-
-    companies = (
-        sorted((vault_root / "companies").glob("*/notes.md"))
-        if (vault_root / "companies").exists()
-        else []
-    )
+        top = list(dir_path.glob("*.md"))
+        stubs = list(dir_path.glob("*/index.md")) + list(dir_path.glob("*/notes.md"))
+        return sorted(p.relative_to(vault_root).as_posix() for p in top + stubs)
 
     return {
-        "companies": [p.relative_to(vault_root).as_posix() for p in companies],
+        "companies": _list(vault_root / "companies"),
         "themes": _list(vault_root / "themes"),
         "concepts": _list(vault_root / "concepts"),
         "people": _list(vault_root / "people"),
@@ -48,7 +50,10 @@ def _render_index(nodes: dict[str, list[str]], ran_at: str) -> str:
             parts.append("_empty_")
         else:
             for p in paths:
-                handle = Path(p).stem if not p.endswith("/notes.md") else p.split("/")[-2]
+                if p.endswith("/notes.md") or p.endswith("/index.md"):
+                    handle = p.split("/")[-2]
+                else:
+                    handle = Path(p).stem
                 parts.append(f"- [[{p}|{handle}]]")
         parts.append("")
     return "\n".join(parts) + "\n"

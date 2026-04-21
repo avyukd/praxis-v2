@@ -94,8 +94,11 @@ async def search_vault(
     from praxis_core.vault.memory import search_vault_memory
 
     settings = get_settings()
+    # Clamp caller-supplied limit. Too-large values blow out the Haiku
+    # rerank prompt and stage-1 scoring budget.
+    bounded_limit = max(1, min(int(limit or 10), 50))
     hits = await search_vault_memory(
-        settings.vault_root, query, limit=limit, scope=scope
+        settings.vault_root, query, limit=bounded_limit, scope=scope
     )
     return [h.to_dict() for h in hits]
 

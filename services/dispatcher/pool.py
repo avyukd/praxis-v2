@@ -37,9 +37,10 @@ class WorkerPool:
         self._worker_seq += 1
         return f"worker-{self._worker_seq:04d}"
 
-    async def submit(self, task: Task, coro) -> RunningTask:
+    async def submit(self, task: Task, coro, worker_id: str | None = None) -> RunningTask:
         async with self._lock:
-            worker_id = self.alloc_worker_id()
+            if worker_id is None:
+                worker_id = self.alloc_worker_id()
             async_task = asyncio.create_task(coro, name=f"{worker_id}:{task.type}:{task.id}")
             rt = RunningTask(
                 task=task,

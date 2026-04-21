@@ -13,15 +13,19 @@ async def emit_event(
     component: str,
     event_type: str,
     payload: dict[str, Any] | None = None,
+    *,
+    session: AsyncSession | None = None,
 ) -> None:
-    async with session_scope() as session:
-        session.add(
-            Event(
-                component=component,
-                event_type=event_type,
-                payload=payload,
-            )
-        )
+    """Record an event. If `session` is provided, the event is added to
+    the caller's transaction — use this when the event should commit
+    atomically with a task-status change (e.g. task_success alongside
+    mark_success). Otherwise opens its own session_scope."""
+    row = Event(component=component, event_type=event_type, payload=payload)
+    if session is not None:
+        session.add(row)
+        return
+    async with session_scope() as own_session:
+        own_session.add(row)
 
 
 async def recent_events(

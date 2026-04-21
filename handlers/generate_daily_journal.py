@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from handlers import HandlerContext, HandlerResult
@@ -24,11 +24,19 @@ async def _summarize_day(session: AsyncSession, date_str: str) -> str:
     start = et_start  # still comparable — sqlalchemy converts tz-aware to UTC
     end = et_end
 
+    # Include tasks whose lifespan overlapped the day — either they
+    # started within the window OR finished within the window. A dive
+    # that begins 23:55 ET and finishes 00:05 ET should appear in both
+    # days' journals (started yesterday, finished today).
     task_rows = (
         await session.execute(
             select(Task.type, Task.status, Task.started_at, Task.finished_at, Task.payload)
-            .where(Task.started_at >= start)
-            .where(Task.started_at < end)
+            .where(
+                or_(
+                    (Task.started_at >= start) & (Task.started_at < end),
+                    (Task.finished_at >= start) & (Task.finished_at < end),
+                )
+            )
             .order_by(Task.started_at)
         )
     ).all()

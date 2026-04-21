@@ -229,6 +229,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                         "type": task.type,
                         "probe_single_use": True,
                     },
+                    session=session,
                 )
                 return
 
@@ -246,6 +247,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                         "type": task.type,
                         "reason": "rate_limit_bounce_cap",
                     },
+                    session=session,
                 )
                 return
             await requeue_on_rate_limit(session, task.id)
@@ -257,6 +259,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                     "type": task.type,
                     "bounces": task.rate_limit_bounces + 1,
                 },
+                session=session,
             )
             return
 
@@ -277,6 +280,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                         "type": task.type,
                         "reason": result.message or "transient",
                     },
+                    session=session,
                 )
                 log.info(
                     "task.transient_retry",
@@ -295,6 +299,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                 "dispatcher.worker",
                 "task_success",
                 {"task_id": str(task.id), "type": task.type, "validation": "skipped"},
+                session=session,
             )
             if task.type == TaskType.RATE_LIMIT_PROBE.value:
                 await rate_limiter.probe_succeeded(session)
@@ -308,6 +313,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                 "dispatcher.worker",
                 "task_success",
                 {"task_id": str(task.id), "type": task.type, "ok": validation.ok},
+                session=session,
             )
             await rate_limiter.reset_consecutive_hits(session)
             if task.type == TaskType.RATE_LIMIT_PROBE.value:
@@ -334,6 +340,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                     "missing": validation.missing,
                     "malformed": [m.model_dump() for m in validation.malformed],
                 },
+                session=session,
             )
             return
 
@@ -347,6 +354,7 @@ async def _handle_failure(session, task: Task, error: str) -> None:
             "dispatcher.worker",
             "task_dead_letter",
             {"task_id": str(task.id), "type": task.type, "error": error[:500]},
+            session=session,
         )
     else:
         await mark_failed(session, task.id, error)
@@ -368,4 +376,5 @@ async def _handle_failure(session, task: Task, error: str) -> None:
                 "attempts": task.attempts,
                 "error": error[:500],
             },
+            session=session,
         )
