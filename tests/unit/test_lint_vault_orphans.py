@@ -5,7 +5,29 @@ from pathlib import Path
 import pytest
 
 from handlers import HandlerContext
-from handlers.lint_vault import handle
+from handlers.lint_vault import _build_note_index, _resolve_wikilink, handle
+
+
+def test_resolve_wikilink_matches_direct_relative_path(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    note = vault / "companies" / "NVDA" / "notes.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("# NVDA\n", encoding="utf-8")
+
+    index = _build_note_index(vault)
+
+    assert _resolve_wikilink(index, "companies/NVDA/notes")
+
+
+def test_resolve_wikilink_matches_stem_without_rescan(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    note = vault / "concepts" / "moat.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("# moat\n", encoding="utf-8")
+
+    index = _build_note_index(vault)
+
+    assert _resolve_wikilink(index, "moat")
 
 
 @pytest.mark.asyncio

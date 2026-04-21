@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import frontmatter
@@ -19,6 +20,13 @@ WIKILINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|[^\]]+)?\]\]")
 _SKIP_DIRS = {"_raw", "_analyzed", ".obsidian", ".cache"}
 
 
+@dataclass(frozen=True)
+class _NoteIndex:
+    notes: list[Path]
+    relpaths: set[str]
+    stems: set[str]
+
+
 def _iter_notes(vault_root: Path):
     for p in vault_root.rglob("*.md"):
         if any(part in _SKIP_DIRS for part in p.parts):
@@ -26,30 +34,38 @@ def _iter_notes(vault_root: Path):
         yield p
 
 
-def _resolve_wikilink(vault_root: Path, target: str) -> bool:
-    target = target.strip()
-    if target.startswith("#"):
+def _build_note_index(vault_root: Path) -> _NoteIndex:
+    notes = list(_iter_notes(vault_root))
+    relpaths = {p.relative_to(vault_root).as_posix() for p in notes}
+    stems = {p.stem for p in notes}
+    return _NoteIndex(notes=notes, relpaths=relpaths, stems=stems)
+
+
+def _resolve_wikilink(index: _NoteIndex, target: str) -> bool:
+    cleaned = target.strip()
+    if not cleaned or cleaned.startswith("#"):
         return True
-    # Try direct path
-    candidates = [
-        vault_root / target,
-        vault_root / (target + ".md"),
-    ]
-    # Try finding by stem match anywhere (basic fuzzy)
-    stem = target.split("/")[-1].replace(".md", "")
-    if stem:
-        for note in _iter_notes(vault_root):
-            if note.stem == stem:
-                candidates.append(note)
-                break
-    return any(c.exists() for c in candidates)
+
+    path_part = cleaned.split("#", 1)[0].strip()
+    if not path_part:
+        return True
+
+    direct_candidates = {path_part}
+    if not path_part.endswith(".md"):
+        direct_candidates.add(f"{path_part}.md")
+    if any(candidate in index.relpaths for candidate in direct_candidates):
+        return True
+
+    stem = path_part.rsplit("/", 1)[-1].removesuffix(".md")
+    return stem in index.stems
 
 
 async def handle(ctx: HandlerContext) -> HandlerResult:
     LintVaultPayload.model_validate(ctx.payload)
 
     findings: list[LintFinding] = []
-    notes = list(_iter_notes(ctx.vault_root))
+    index = _build_note_index(ctx.vault_root)
+    notes = index.notes
     inbound: dict[str, int] = {}
     stats = {"total_notes": len(notes), "checked_links": 0}
 
@@ -84,7 +100,7 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
             target = match.group(1)
             stats["checked_links"] += 1
             inbound[target] = inbound.get(target, 0) + 1
-            if not _resolve_wikilink(ctx.vault_root, target):
+            if not _resolve_wikilink(index, target):
                 findings.append(
                     LintFinding(
                         severity="error",
