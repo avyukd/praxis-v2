@@ -29,11 +29,38 @@ class CadenceJob:
     interval_s: int
     action: Callable[[AsyncSession], Awaitable[None]]
     last_run: datetime | None = None
+    consecutive_failures: int = 0
+    last_error: str | None = None
 
     def due(self, now: datetime) -> bool:
         if self.last_run is None:
             return True
         return (now - self.last_run).total_seconds() >= self.interval_s
+
+
+JOB_FAILURE_ALERT_THRESHOLD = 3
+
+
+def _mark_job_success(job: CadenceJob) -> None:
+    job.consecutive_failures = 0
+    job.last_error = None
+
+
+def _mark_job_failure(job: CadenceJob, error: Exception) -> None:
+    job.consecutive_failures += 1
+    job.last_error = str(error)[:200]
+
+
+def _job_failure_alerts(jobs: list[CadenceJob]) -> list[str]:
+    alerts: list[str] = []
+    for job in jobs:
+        if job.consecutive_failures >= JOB_FAILURE_ALERT_THRESHOLD:
+            alerts.append(
+                f"Scheduler job failing repeatedly: {job.name} "
+                f"({job.consecutive_failures} consecutive failures). "
+                f"last_error={job.last_error or 'unknown'}"
+            )
+    return alerts
 
 
 async def _enqueue_refresh_index(session: AsyncSession) -> None:
@@ -227,14 +254,17 @@ async def run_loop() -> None:
                     try:
                         await job.action(session)
                         job.last_run = now
+                        _mark_job_success(job)
                         log.info("scheduler.job_enqueued", job=job.name)
                     except Exception as e:
+                        _mark_job_failure(job, e)
                         log.warning("scheduler.job_fail", job=job.name, error=str(e))
 
         # Dead-man's switch
         try:
             async with session_scope() as session:
                 alerts = await _check_dead_man(session)
+            alerts.extend(_job_failure_alerts(JOBS))
             for msg in alerts:
                 fingerprint = msg.split(":")[0][:80]
                 if _should_alert(fingerprint):
@@ -250,7 +280,11 @@ async def run_loop() -> None:
 
         await beat(
             "scheduler.main",
-            status={"last_tick_at": et_iso(now), "jobs": len(JOBS)},
+            status={
+                "last_tick_at": et_iso(now),
+                "jobs": len(JOBS),
+                "job_failures": {j.name: j.consecutive_failures for j in JOBS},
+            },
         )
 
         try:
