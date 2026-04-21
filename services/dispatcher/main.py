@@ -75,6 +75,12 @@ async def _dispatch_tick(pool: WorkerPool) -> int:
     if available <= 0:
         return 0
 
+    # Serialize probes: one at a time. Without this, if multiple probe
+    # tasks are queued, the claim loop fires up to pool_size probes in
+    # parallel and they all hit upstream RL at the same instant.
+    if probing:
+        available = 1
+
     for _ in range(available):
         excluded_resources = pool.running_resource_keys()
         async with session_scope() as session:

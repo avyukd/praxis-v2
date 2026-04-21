@@ -90,6 +90,38 @@ def test_rejected_rate_limit_event_flagged() -> None:
     assert parser.rate_limit_hit
 
 
+def test_allowed_warning_not_flagged() -> None:
+    """Soft-warning statuses (approaching limit but still served) must not
+    trip the rate-limit detection — previously we used deny-list matching
+    and flagged any non-'allowed' status."""
+    parser = StreamParser()
+    _feed_events(
+        parser,
+        [
+            {
+                "type": "rate_limit_event",
+                "rate_limit_info": {"status": "allowed_warning", "resetsAt": 1776589000},
+            },
+        ],
+    )
+    assert not parser.rate_limit_hit
+    assert parser.rate_limit_resets_at == 1776589000
+
+
+def test_exceeded_status_flagged() -> None:
+    parser = StreamParser()
+    _feed_events(
+        parser,
+        [
+            {
+                "type": "rate_limit_event",
+                "rate_limit_info": {"status": "exceeded", "resetsAt": 1776589000},
+            },
+        ],
+    )
+    assert parser.rate_limit_hit
+
+
 def test_tool_use_message_is_not_rate_limit() -> None:
     """A `tool_use` assistant content block shouldn't trigger rate-limit detection."""
     parser = StreamParser()

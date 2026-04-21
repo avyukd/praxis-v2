@@ -212,7 +212,26 @@ async def execute_task(task: Task, worker_id: str) -> None:
             await record_task_telemetry(session, task.id, llm)
 
         if result.message == "rate_limit" or (llm and llm.finish_reason == "rate_limit"):
-            await rate_limiter.record_hit(session)
+            upstream_resets_at = llm.rate_limit_resets_at if llm is not None else None
+            await rate_limiter.record_hit(session, upstream_resets_at=upstream_resets_at)
+
+            # Probe tasks are single-use signals. record_hit above already
+            # updated rate_limit_state; requeueing the probe would accumulate
+            # stale probes (seen 7 queued at once). Mark failed and let the
+            # next _maybe_launch_probe cycle spawn a fresh one.
+            if task.type == TaskType.RATE_LIMIT_PROBE.value:
+                await mark_failed(session, task.id, "probe observed upstream rate_limit")
+                await emit_event(
+                    "dispatcher.worker",
+                    "task_rate_limit",
+                    {
+                        "task_id": str(task.id),
+                        "type": task.type,
+                        "probe_single_use": True,
+                    },
+                )
+                return
+
             if task.rate_limit_bounces + 1 >= RATE_LIMIT_BOUNCE_CAP:
                 await mark_dead_letter(
                     session,

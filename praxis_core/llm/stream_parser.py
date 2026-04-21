@@ -31,6 +31,17 @@ RATE_LIMIT_MARKERS: tuple[str, ...] = (
 )
 
 
+_REJECT_STATUSES = frozenset(
+    {
+        "rejected",
+        "exceeded",
+        "throttled",
+        "limited",
+        "blocked",
+    }
+)
+
+
 def _text_has_rate_limit(text: str) -> bool:
     lower = text.lower()
     return any(m in lower for m in RATE_LIMIT_MARKERS)
@@ -91,7 +102,10 @@ class StreamParser:
     def _handle_rate_limit_event(self, event: ClaudeStreamEvent, obj: dict[str, Any]) -> None:
         """Claude Code emits this every invocation; structured rate-limit status.
 
-        Only treat it as a 'rate limit hit' if status is not 'allowed'.
+        Only treat it as a hit on explicit reject statuses. Previously we
+        used a deny-list (anything != "allowed") which also flagged soft
+        signals like "allowed_warning" (approaching limit, still serving),
+        causing us to go `limited` when nowhere near the actual cap.
         """
         info = obj.get("rate_limit_info") or {}
         if not isinstance(info, dict):
@@ -101,7 +115,7 @@ class StreamParser:
             event.rate_limit_resets_at = int(resets_at)
             self.rate_limit_resets_at = int(resets_at)
         status = str(info.get("status", "")).lower()
-        if status and status not in {"allowed", "ok", ""}:
+        if status in _REJECT_STATUSES:
             event.is_rate_limit = True
             self.rate_limit_hit = True
 

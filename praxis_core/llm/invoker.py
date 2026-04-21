@@ -43,6 +43,10 @@ class LLMResult(BaseModel):
     raw_events: list[dict[str, Any]] = Field(default_factory=list)
     model: str
     invoker: Literal["cli", "api"]
+    # Unix seconds when upstream's rate-limit window re-opens. Populated by
+    # stream_parser from rate_limit_event.resetsAt. Drives record_hit so we
+    # wait exactly until Anthropic's actual reset, not a local guess.
+    rate_limit_resets_at: int | None = None
 
 
 MODEL_BUDGETS_USD: dict[TaskModel, float] = {
@@ -268,6 +272,7 @@ class CLIInvoker:
                 raw_events=[e.raw for e in parser.events],
                 model=str(model),
                 invoker="cli",
+                rate_limit_resets_at=parser.rate_limit_resets_at,
             )
         finally:
             if proc.returncode is None:
