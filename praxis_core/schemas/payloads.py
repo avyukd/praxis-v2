@@ -166,6 +166,8 @@ PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "dive_custom": DiveCustomPayload,
     "synthesize_memo": SynthesizeMemoPayload,
     "refresh_index": RefreshIndexPayload,
+    "refresh_backlinks": RefreshBacklinksPayload,
+    "ticker_index": TickerIndexPayload,
     "lint_vault": LintVaultPayload,
     "generate_daily_journal": GenerateDailyJournalPayload,
     "rate_limit_probe": RateLimitProbePayload,
