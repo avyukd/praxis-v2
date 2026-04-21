@@ -17,6 +17,9 @@ class SurfacedIdea(BaseModel):
         "question_answered",
         "concept_promotion",
         "anomaly",
+        "stale_refresh",
+        "theme_deep_dive",
+        "exploration",
     ]
     tickers: list[str] = Field(default_factory=list)
     themes: list[str] = Field(default_factory=list)

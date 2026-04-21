@@ -1,9 +1,22 @@
-"""Surface ideas handler — periodic ideation over recent analyses + vault state (D44-D52)."""
+"""Surface ideas handler — non-deterministic analyst engine.
+
+Picks a mode weighted-random each run (recent_signals / question_pursuit /
+stale_coverage / theme_deepening / random_exploration), gathers
+mode-specific inputs, runs a Haiku or Sonnet call, and feeds the
+downstream dedup + autodispatch pipeline shared across all modes.
+
+Operator steering from vault/_analyst/steering.md is prepended to every
+prompt so the engine drifts toward whatever the observer is currently
+focused on. This is how the atom-splitter keeps busy and how knowledge
+compounds — dives generate questions → question_pursuit picks them up →
+new dives generate more questions.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import random
 import re
 import uuid
 from datetime import UTC, timedelta
@@ -16,6 +29,13 @@ from sqlalchemy import select, text
 from handlers import HandlerContext, HandlerResult
 from handlers._common import run_llm
 from handlers.prompts.surface_ideas import SYSTEM_PROMPT
+from handlers.prompts.surface_modes import (
+    QUESTION_PURSUIT_PROMPT,
+    RANDOM_EXPLORATION_PROMPT,
+    RECENT_SIGNALS_PROMPT,
+    STALE_COVERAGE_PROMPT,
+    THEME_DEEPENING_PROMPT,
+)
 from praxis_core.db.models import SignalFired
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
@@ -25,13 +45,26 @@ from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.capacity import get_pool_capacity
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
+from praxis_core.vault.followups import load_open_followups
 from praxis_core.vault.section_append import append_to_section
+from praxis_core.vault.steering import recent_steering
 from praxis_core.vault.writer import atomic_write
 
 log = get_logger("handlers.surface_ideas")
 
 SURFACE_BUDGET_USD = 1.00
 MAX_IDEAS_PER_BATCH = 10
+
+# Weighted mode selection. Sum doesn't need to be 100 — random.choices
+# normalizes. Tune these over time by watching which modes produce
+# ideas that actually convert to shipped memos.
+MODE_WEIGHTS: list[tuple[str, int]] = [
+    ("recent_signals", 40),
+    ("question_pursuit", 25),
+    ("stale_coverage", 15),
+    ("theme_deepening", 10),
+    ("random_exploration", 10),
+]
 
 
 def _hash_evidence(evidence: list[str]) -> str:
@@ -285,35 +318,270 @@ async def _persist_and_dedup(
     return kept
 
 
+def _ticker_universe(vault_root: Path) -> list[str]:
+    companies_dir = vault_root / "companies"
+    if not companies_dir.exists():
+        return []
+    return sorted(p.name.upper() for p in companies_dir.iterdir() if p.is_dir())
+
+
+def _stale_coverage_candidates(
+    vault_root: Path, tickers: list[str], *, min_age_days: int = 30, sample: int = 8
+) -> list[dict[str, Any]]:
+    """Return up to `sample` tickers whose notes.md is stale or nonexistent.
+    Includes file age, notes size, and number of dives on disk."""
+    cutoff = now_utc() - timedelta(days=min_age_days)
+    out: list[dict[str, Any]] = []
+    from datetime import datetime
+
+    candidates = random.sample(tickers, k=min(len(tickers), sample * 4))
+    for t in candidates:
+        notes_path = vault_root / "companies" / t / "notes.md"
+        dives_dir = vault_root / "companies" / t / "dives"
+        if notes_path.exists():
+            try:
+                mtime_utc = datetime.fromtimestamp(notes_path.stat().st_mtime, tz=UTC)
+                size = notes_path.stat().st_size
+            except OSError:
+                continue
+            if mtime_utc > cutoff and size > 2000:
+                continue
+            age_days = int((now_utc() - mtime_utc).total_seconds() / 86400)
+        else:
+            size = 0
+            age_days = -1
+        dive_count = len(list(dives_dir.glob("*.md"))) if dives_dir.exists() else 0
+        out.append(
+            {
+                "ticker": t,
+                "notes_bytes": size,
+                "notes_age_days": age_days,
+                "dive_count": dive_count,
+            }
+        )
+        if len(out) >= sample:
+            break
+    return out
+
+
+def _companies_tagged_with_theme(vault_root: Path, theme_slug: str) -> list[str]:
+    tickers: set[str] = set()
+    companies_dir = vault_root / "companies"
+    if not companies_dir.exists():
+        return []
+    theme_tag = f"themes/{theme_slug}"
+    for d in companies_dir.iterdir():
+        if not d.is_dir():
+            continue
+        notes = d / "notes.md"
+        if not notes.exists():
+            continue
+        try:
+            post = frontmatter.load(str(notes))
+        except Exception:
+            continue
+        tags = post.metadata.get("tags") or []
+        if any(theme_slug in str(t) or theme_tag in str(t) for t in tags):
+            tickers.add(d.name.upper())
+    return sorted(tickers)
+
+
+def _pick_mode(available_modes: set[str] | None = None) -> str:
+    pairs = [
+        (m, w) for m, w in MODE_WEIGHTS
+        if available_modes is None or m in available_modes
+    ]
+    if not pairs:
+        return "recent_signals"
+    modes, weights = zip(*pairs, strict=True)
+    return random.choices(modes, weights=weights, k=1)[0]
+
+
+async def _build_recent_signals_run(
+    ctx: HandlerContext, steering: str, focus: str
+) -> tuple[str, str, TaskModel] | None:
+    async with session_scope() as session:
+        signals = await _recent_signals(session)
+    themes = _active_themes(ctx.vault_root)
+    concepts = _concept_titles(ctx.vault_root)
+    questions = _open_questions(ctx.vault_root)
+    if not signals and not themes:
+        return None
+    body = _build_llm_input(signals, themes, concepts, questions)
+    user = _wrap_user_prompt(
+        "recent_signals",
+        f"Cross-check the following inputs and emit up to {MAX_IDEAS_PER_BATCH} ranked ideas.\n\n{body}",
+        steering,
+        focus,
+    )
+    return RECENT_SIGNALS_PROMPT, user, TaskModel.SONNET
+
+
+async def _build_question_pursuit_run(
+    ctx: HandlerContext, steering: str, focus: str
+) -> tuple[str, str, TaskModel] | None:
+    followups = load_open_followups(ctx.vault_root, limit=40)
+    if not followups:
+        return None
+    picked = random.sample(followups, k=min(len(followups), 6))
+    lines = [f"# {len(picked)} open followup questions (sampled from {len(followups)})", ""]
+    for q in picked:
+        lines.append(
+            f"## [[questions/{q['slug']}]] — {q['title']}"
+        )
+        lines.append(f"Ticker: {q.get('ticker') or '—'}  ·  "
+                     f"Priority: {q.get('priority')}  ·  "
+                     f"Origin: {q.get('origin_task_type') or '—'}  ·  "
+                     f"Created: {q.get('created_at','')[:16]}")
+        body = q.get("body_excerpt") or ""
+        lines.append(body[:500])
+        lines.append("")
+    user = _wrap_user_prompt(
+        "question_pursuit",
+        "Triage these open questions and propose 1-3 concrete investigations "
+        "that would advance the most fruitful ones.\n\n" + "\n".join(lines),
+        steering,
+        focus,
+    )
+    return QUESTION_PURSUIT_PROMPT, user, TaskModel.SONNET
+
+
+async def _build_stale_coverage_run(
+    ctx: HandlerContext, steering: str, focus: str
+) -> tuple[str, str, TaskModel] | None:
+    tickers = _ticker_universe(ctx.vault_root)
+    if not tickers:
+        return None
+    cands = _stale_coverage_candidates(ctx.vault_root, tickers, sample=8)
+    if not cands:
+        return None
+    lines = [f"# {len(cands)} stale-coverage candidates"]
+    for c in cands:
+        age = f"{c['notes_age_days']}d" if c["notes_age_days"] >= 0 else "never"
+        lines.append(
+            f"- {c['ticker']}: notes {c['notes_bytes']}B (age {age}), "
+            f"{c['dive_count']} dives on disk"
+        )
+    user = _wrap_user_prompt(
+        "stale_coverage",
+        "Pick 1-3 tickers from the list whose coverage would benefit most "
+        "from a refresh dive.\n\n" + "\n".join(lines),
+        steering,
+        focus,
+    )
+    return STALE_COVERAGE_PROMPT, user, TaskModel.HAIKU
+
+
+async def _build_theme_deepening_run(
+    ctx: HandlerContext, steering: str, focus: str
+) -> tuple[str, str, TaskModel] | None:
+    themes = _active_themes(ctx.vault_root)
+    if not themes:
+        return None
+    theme = random.choice(themes)
+    tagged = _companies_tagged_with_theme(ctx.vault_root, theme["slug"])
+    theme_path = ctx.vault_root / theme["path"]
+    try:
+        theme_body = theme_path.read_text(encoding="utf-8")[:2500]
+    except OSError:
+        theme_body = theme.get("summary_first_200") or ""
+    lines = [
+        f"# Theme: [[themes/{theme['slug']}]] — {theme['title']}",
+        f"Tags: {', '.join(theme.get('tags') or []) or '(none)'}",
+        f"Companies tagged with this theme ({len(tagged)}): "
+        f"{', '.join(tagged[:25]) or '(none)'}",
+        "",
+        "## Theme body (first 2500 chars)",
+        theme_body,
+    ]
+    user = _wrap_user_prompt(
+        "theme_deepening",
+        "Propose 1-3 companies tagged with this theme whose research would "
+        "sharpen or reshape the theme.\n\n" + "\n".join(lines),
+        steering,
+        focus,
+    )
+    return THEME_DEEPENING_PROMPT, user, TaskModel.SONNET
+
+
+async def _build_random_exploration_run(
+    ctx: HandlerContext, steering: str, focus: str
+) -> tuple[str, str, TaskModel] | None:
+    tickers = _ticker_universe(ctx.vault_root)
+    if not tickers:
+        return None
+    picked = random.sample(tickers, k=min(len(tickers), 8))
+    lines = [f"# {len(picked)} random universe tickers"]
+    for t in picked:
+        lines.append(f"- {t}")
+    user = _wrap_user_prompt(
+        "random_exploration",
+        "Pick 0-2 tickers worth a first dive. Empty list is fine if none "
+        "are interesting right now.\n\n" + "\n".join(lines),
+        steering,
+        focus,
+    )
+    return RANDOM_EXPLORATION_PROMPT, user, TaskModel.HAIKU
+
+
+def _wrap_user_prompt(mode: str, body: str, steering: str, focus: str) -> str:
+    parts = [f"SURFACE IDEAS (mode: {mode})"]
+    if steering:
+        parts.append(steering)
+    if focus:
+        parts.append(f"\nFocus hint from operator (one-shot): {focus}")
+    parts.append(body)
+    return "\n\n".join(parts)
+
+
+_MODE_BUILDERS = {
+    "recent_signals": _build_recent_signals_run,
+    "question_pursuit": _build_question_pursuit_run,
+    "stale_coverage": _build_stale_coverage_run,
+    "theme_deepening": _build_theme_deepening_run,
+    "random_exploration": _build_random_exploration_run,
+}
+
+
 async def handle(ctx: HandlerContext) -> HandlerResult:
     payload = SurfaceIdeasPayload.model_validate(ctx.payload)
     vault_root = ctx.vault_root
 
-    # Gather inputs
-    async with session_scope() as session:
-        signals = await _recent_signals(session)
-    themes = _active_themes(vault_root)
-    concepts = _concept_titles(vault_root)
-    questions = _open_questions(vault_root)
+    steering = recent_steering(vault_root, max_entries=10)
+    focus = payload.focus or ""
 
-    if not signals and not themes:
+    chosen = _pick_mode()
+    log.info("surface.mode_picked", mode=chosen, task_id=ctx.task_id)
+
+    built = await _MODE_BUILDERS[chosen](ctx, steering, focus)
+    if built is None:
+        # Chosen mode had no inputs; fall back to whichever mode has data,
+        # preferring cheaper modes first so we don't burn Sonnet on a
+        # legit-empty run. If all fall through, exit clean.
+        fallback_order = [
+            "random_exploration",
+            "stale_coverage",
+            "recent_signals",
+            "question_pursuit",
+            "theme_deepening",
+        ]
+        for m in fallback_order:
+            if m == chosen:
+                continue
+            built = await _MODE_BUILDERS[m](ctx, steering, focus)
+            if built is not None:
+                log.info("surface.mode_fallback", original=chosen, used=m)
+                chosen = m
+                break
+    if built is None:
         log.info("surface.no_inputs", task_id=ctx.task_id)
-        return HandlerResult(ok=True, message="no inputs to surface")
+        return HandlerResult(ok=True, message="no inputs across any mode")
 
-    user_prompt_body = _build_llm_input(signals, themes, concepts, questions)
-    focus_hint = f"\n\nFocus hint from operator: {payload.focus}" if payload.focus else ""
-    user_prompt = f"""SURFACE IDEAS
-
-Cross-check the following inputs and emit up to {MAX_IDEAS_PER_BATCH} ranked ideas
-per the schema.{focus_hint}
-
-{user_prompt_body}
-"""
-
+    system_prompt, user_prompt, llm_model = built
     result = await run_llm(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_prompt=user_prompt,
-        model=TaskModel.SONNET,
+        model=llm_model,
         max_budget_usd=SURFACE_BUDGET_USD,
         vault_root=vault_root,
         allowed_tools=[],
@@ -326,7 +594,7 @@ per the schema.{focus_hint}
     if dropped:
         log.info("surface.anomaly_cap_enforced", dropped=dropped, task_id=ctx.task_id)
 
-    batch_handle = f"batch-{now_et().strftime('%Y%m%d-%H%M')}"
+    batch_handle = f"batch-{now_et().strftime('%Y%m%d-%H%M')}-{chosen}"
     kept = await _persist_and_dedup(ideas_raw, batch_handle)
 
     # Write batch file
@@ -399,6 +667,7 @@ per the schema.{focus_hint}
         "surface.done",
         task_id=ctx.task_id,
         batch=batch_handle,
+        mode=chosen,
         ideas=len(kept),
         high=len(high),
         anomalies_dropped=dropped,

@@ -15,14 +15,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+import re
+
 from handlers import HandlerContext, HandlerResult
 from handlers._common import DIVE_ALLOWED_TOOLS, read_vault_schema, run_llm
+from handlers.prompts.dive_reflect import REFLECT_SYSTEM_PROMPT
 from praxis_core.logging import get_logger
 from praxis_core.research.budget import ResearchBudget
 from praxis_core.schemas.task_types import TaskModel
 from praxis_core.tasks.investigations import touch_investigation
 from praxis_core.time_et import et_iso
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.followups import write_followup
 from praxis_core.vault.writer import atomic_write
 
 log = get_logger("handlers.dive")
@@ -214,4 +219,115 @@ Process (non-negotiable — the validator checks for proof of each step):
     )
     if result.finish_reason == "rate_limit":
         return HandlerResult(ok=False, llm_result=result, message="rate_limit")
+
+    try:
+        await _reflect_and_write_followups(
+            ctx=ctx,
+            output_path=output_path,
+            ticker=ticker,
+            specialty_slug=specialty_slug,
+            investigation_handle=investigation_handle,
+        )
+    except Exception as e:
+        log.warning(
+            "dive.reflect_fail",
+            specialty=specialty_slug,
+            ticker=ticker,
+            error=str(e)[:200],
+        )
+
     return HandlerResult(ok=True, llm_result=result)
+
+
+_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+async def _reflect_and_write_followups(
+    *,
+    ctx: HandlerContext,
+    output_path: Path,
+    ticker: str,
+    specialty_slug: str,
+    investigation_handle: str,
+) -> None:
+    """Short Haiku call after the dive: 'what would you want to investigate
+    next?' Followup questions go to vault/questions/. Dedup by (title,
+    ticker) hash so repeated dives don't spam duplicates.
+    """
+    if not output_path.exists():
+        return
+    try:
+        dive_text = output_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    excerpt = dive_text[:6000]
+
+    user_prompt = (
+        f"Ticker: {ticker}\n"
+        f"Specialty: {specialty_slug}\n"
+        f"Investigation: {investigation_handle or '(standalone)'}\n\n"
+        "Dive content (first 6000 chars):\n---\n"
+        f"{excerpt}\n---\n\n"
+        "Emit up to 3 followup questions per schema. Return JSON only."
+    )
+
+    result = await run_llm(
+        system_prompt=REFLECT_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model=TaskModel.HAIKU,
+        max_budget_usd=0.15,
+        vault_root=ctx.vault_root,
+        allowed_tools=[],
+    )
+    if result.finish_reason == "rate_limit":
+        log.info("dive.reflect_rate_limit", specialty=specialty_slug, ticker=ticker)
+        return
+
+    text = (result.text or "").strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:-1] if lines[-1].startswith("```") else lines[1:])
+    m = _JSON_OBJ_RE.search(text)
+    if not m:
+        log.info("dive.reflect_no_json", specialty=specialty_slug, ticker=ticker)
+        return
+    try:
+        data = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        log.info("dive.reflect_bad_json", specialty=specialty_slug, ticker=ticker)
+        return
+
+    questions = data.get("questions") or []
+    if not isinstance(questions, list):
+        return
+
+    written = 0
+    for q in questions[:3]:
+        if not isinstance(q, dict):
+            continue
+        title = str(q.get("title") or "").strip()
+        body = str(q.get("body") or "").strip()
+        priority = str(q.get("priority") or "medium").lower()
+        if priority not in ("low", "medium", "high"):
+            priority = "medium"
+        if not title or not body:
+            continue
+        result_path = write_followup(
+            ctx.vault_root,
+            title=title,
+            body=body,
+            origin_task_type=ctx.task_type,
+            ticker=ticker,
+            investigation_handle=investigation_handle or None,
+            priority=priority,
+            tags=[f"origin:{specialty_slug}"],
+        )
+        if result_path is not None:
+            written += 1
+    log.info(
+        "dive.reflect_done",
+        specialty=specialty_slug,
+        ticker=ticker,
+        proposed=len(questions),
+        written=written,
+    )

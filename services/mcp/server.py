@@ -25,6 +25,7 @@ from praxis_core.schemas.task_types import TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault import conventions as vc
+from praxis_core.vault.steering import append_steering, recent_steering, steering_path
 from praxis_core.vault.writer import atomic_write
 
 log = get_logger("mcp.server")
@@ -169,6 +170,45 @@ async def list_surfaced_ideas(
         }
         for r in rows
     ]
+
+
+@mcp.tool()
+async def steer_analyst(direction: str) -> dict[str, Any]:
+    """Append a natural-language steering note that guides the non-
+    deterministic analyst engine (surface_ideas modes). Every surface run
+    reads the most recent steering entries and prepends them to the LLM
+    prompt, so the analyst drifts toward whatever the observer is
+    currently interested in.
+
+    Examples:
+      steer_analyst("focus more on micro-caps — we have edge there that
+                     we don't in large caps")
+      steer_analyst("cool off on biotech for a week, too much
+                     duplication in that basket")
+      steer_analyst("prioritize balance-sheet fragility threads given
+                     the tape this week")
+
+    Returns the steering file path + current entry count."""
+    settings = get_settings()
+    path = append_steering(settings.vault_root, direction, author="observer")
+    return {
+        "ok": True,
+        "path": str(path.relative_to(settings.vault_root)),
+        "chars": len(direction),
+    }
+
+
+@mcp.tool()
+async def show_steering() -> dict[str, Any]:
+    """Return the current steering file content the analyst sees on each
+    surface run — newest first, up to 10 entries."""
+    settings = get_settings()
+    text = recent_steering(settings.vault_root, max_entries=10)
+    return {
+        "ok": True,
+        "path": str(steering_path(settings.vault_root).relative_to(settings.vault_root)),
+        "content": text or "(no steering entries yet)",
+    }
 
 
 @mcp.tool()
