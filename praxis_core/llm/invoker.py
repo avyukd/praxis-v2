@@ -57,6 +57,8 @@ MODEL_BUDGETS_USD: dict[TaskModel, float] = {
     TaskModel.NONE: 0.0,
 }
 
+_INTERRUPTED_RETURNCODES = {130, 137, 143, -2, -9, -15}
+
 
 def _locate_claude_cli() -> str:
     """Resolve the claude CLI binary path. Systemd services have minimal PATH
@@ -89,6 +91,22 @@ def require_claude_cli() -> str:
     raise FileNotFoundError(
         "Claude CLI not found. Install `claude` or set PRAXIS_INVOKER=api before starting workers."
     )
+
+
+def classify_finish_reason(
+    finish: FinishReason,
+    *,
+    returncode: int,
+    saw_result: bool,
+    rate_limit_hit: bool,
+) -> FinishReason:
+    if finish != "error" or returncode == 0 or saw_result:
+        return finish
+    if rate_limit_hit:
+        return "rate_limit"
+    if returncode in _INTERRUPTED_RETURNCODES:
+        return "killed"
+    return "error"
 
 
 class LLMInvoker(Protocol):
@@ -283,8 +301,12 @@ class CLIInvoker:
             except TimeoutError:
                 returncode = -1
 
-            if finish == "error" and returncode != 0 and not parser.saw_result:
-                finish = "rate_limit" if parser.rate_limit_hit else "error"
+            finish = classify_finish_reason(
+                finish,
+                returncode=returncode,
+                saw_result=parser.saw_result,
+                rate_limit_hit=parser.rate_limit_hit,
+            )
 
             duration = time.monotonic() - started_at
             log.info(

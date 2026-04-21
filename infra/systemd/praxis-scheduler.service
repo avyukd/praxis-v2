@@ -2,6 +2,8 @@
 Description=praxis-v2 scheduler + dead-man switch
 After=network.target postgresql.service
 Wants=postgresql.service
+StartLimitBurst=5
+StartLimitIntervalSec=120
 
 [Service]
 Type=notify
@@ -14,8 +16,6 @@ EnvironmentFile=/home/avyuk/dev/praxis-v2/.env
 ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.scheduler.main
 Restart=always
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=120
 StandardOutput=journal
 StandardError=journal
 

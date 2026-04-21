@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from praxis_core.llm.invoker import CLIInvoker, LLMResult, require_claude_cli
+from praxis_core.llm.invoker import (
+    CLIInvoker,
+    LLMResult,
+    classify_finish_reason,
+    require_claude_cli,
+)
 from praxis_core.schemas.task_types import TaskModel
 
 
@@ -281,3 +286,15 @@ def test_require_claude_cli_raises_when_missing(
 
     with pytest.raises(FileNotFoundError, match="Claude CLI not found"):
         require_claude_cli()
+
+
+def test_classify_finish_reason_maps_signal_exit_to_killed() -> None:
+    assert (
+        classify_finish_reason(
+            "error",
+            returncode=143,
+            saw_result=False,
+            rate_limit_hit=False,
+        )
+        == "killed"
+    )

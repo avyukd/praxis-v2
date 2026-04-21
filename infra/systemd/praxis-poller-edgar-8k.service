@@ -1,6 +1,8 @@
 [Unit]
 Description=praxis-v2 EDGAR 8-K poller
 After=network.target postgresql.service
+StartLimitBurst=5
+StartLimitIntervalSec=120
 
 [Service]
 Type=simple
@@ -11,8 +13,6 @@ EnvironmentFile=/home/avyuk/dev/praxis-v2/.env
 ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.pollers.edgar_8k
 Restart=always
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=120
 StandardOutput=journal
 StandardError=journal
 

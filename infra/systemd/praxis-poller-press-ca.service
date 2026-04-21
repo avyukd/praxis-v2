@@ -1,6 +1,8 @@
 [Unit]
 Description=praxis-v2 Canadian press-release poller (GNW CA + CNW + Newsfile)
 After=network.target postgresql.service
+StartLimitBurst=5
+StartLimitIntervalSec=120
 
 [Service]
 Type=simple
@@ -11,8 +13,6 @@ EnvironmentFile=/home/avyuk/dev/praxis-v2/.env
 ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.pollers.press_ca
 Restart=always
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=120
 StandardOutput=journal
 StandardError=journal
 

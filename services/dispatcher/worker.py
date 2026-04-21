@@ -32,6 +32,7 @@ log = get_logger("dispatcher.worker")
 
 # If a task has bounced on rate limits this many times, dead-letter it.
 RATE_LIMIT_BOUNCE_CAP = 10
+INTERRUPTED_TASK_BACKOFF_S = 5
 
 
 def validation_failure_reason(validation) -> str:
@@ -54,6 +55,30 @@ async def requeue_canceled_task(task: Task, *, backoff_s: int = 5) -> None:
             session=session,
         )
     log.warning("task.shutdown_requeued", task_id=str(task.id), task_type=task.type)
+
+
+async def requeue_interrupted_llm_task(
+    session,
+    task: Task,
+    llm: LLMResult | None,
+    *,
+    backoff_s: int = INTERRUPTED_TASK_BACKOFF_S,
+) -> bool:
+    if llm is None or llm.finish_reason != "killed":
+        return False
+    await release_task(session, task.id, backoff_s=backoff_s)
+    await emit_event(
+        "dispatcher.worker",
+        "task_interrupted_requeued",
+        {
+            "task_id": str(task.id),
+            "type": task.type,
+            "backoff_s": backoff_s,
+        },
+        session=session,
+    )
+    log.warning("task.interrupted_requeued", task_id=str(task.id), task_type=task.type)
+    return True
 
 
 async def _heartbeat_loop(task_id: uuid.UUID, worker_id: str, stop: asyncio.Event) -> None:
@@ -245,6 +270,9 @@ async def execute_task(task: Task, worker_id: str) -> None:
         async with session_scope() as session:
             if llm is not None:
                 await record_task_telemetry(session, task.id, llm)
+
+            if await requeue_interrupted_llm_task(session, task, llm):
+                return
 
             if result.message == "rate_limit" or (llm and llm.finish_reason == "rate_limit"):
                 upstream_resets_at = llm.rate_limit_resets_at if llm is not None else None
