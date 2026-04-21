@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,11 @@ SPECIALTIES = [
     "macro",
 ]
 FIN_RIGOROUS_MIN_CHARS = 1000
+
+# Hard cap on how long we'll transient-retry waiting for a sibling dive
+# that's left a skeleton file on disk. After this window we assume the
+# dive crashed and proceed with a degraded memo rather than loop forever.
+SKELETON_WALLCLOCK_CAP_S = 4 * 3600  # 4 hours
 
 
 @dataclass
@@ -277,31 +283,51 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
     # ok=False with "dives_incomplete" so the worker requeues it.
     dives_dir = ctx.vault_root / "companies" / payload.ticker / "dives"
     skeleton_specialties: list[str] = []
+    oldest_skeleton_age_s: float = 0.0
+    now_ts = time.time()
     for slug in SPECIALTIES:
         p = dives_dir / f"{slug}.md"
         if not p.exists():
             continue  # missing is fine — investigation may legitimately skip
         try:
-            if p.stat().st_size < 1500:
+            st = p.stat()
+            if st.st_size < 1500:
                 skeleton_specialties.append(slug)
+                age = now_ts - st.st_mtime
+                if age > oldest_skeleton_age_s:
+                    oldest_skeleton_age_s = age
         except OSError:
             pass
     if skeleton_specialties:
-        log.info(
-            "synthesize_memo.dives_incomplete",
-            ticker=payload.ticker,
-            skeleton=skeleton_specialties,
-        )
-        # transient=True → worker cooperatively requeues without
-        # incrementing attempts. Previously this burned max_attempts=3
-        # and DL'd when dives took >3× the retry window.
-        return HandlerResult(
-            ok=False,
-            transient=True,
-            message=(
-                f"dives still writing (skeleton-sized): {skeleton_specialties}"
-            ),
-        )
+        # Wall-clock cap: if the oldest skeleton is > SKELETON_WALLCLOCK_CAP_S
+        # old, the dive is crashed rather than slow. Stop transient-retrying;
+        # proceed to write a degraded memo that explicitly flags the missing
+        # specialties as gaps. Prevents the infinite-retry loop flagged in
+        # scratch/4-20-overnight.md A.1.
+        if oldest_skeleton_age_s > SKELETON_WALLCLOCK_CAP_S:
+            log.warning(
+                "synthesize_memo.skeleton_timeout",
+                ticker=payload.ticker,
+                skeleton=skeleton_specialties,
+                oldest_age_s=int(oldest_skeleton_age_s),
+            )
+            # Fall through — don't return transient. The memo handler below
+            # reads whatever dives DO have content and writes a memo that
+            # notes the gaps. Better than an eternally-retrying task.
+        else:
+            log.info(
+                "synthesize_memo.dives_incomplete",
+                ticker=payload.ticker,
+                skeleton=skeleton_specialties,
+                oldest_age_s=int(oldest_skeleton_age_s),
+            )
+            return HandlerResult(
+                ok=False,
+                transient=True,
+                message=(
+                    f"dives still writing (skeleton-sized): {skeleton_specialties}"
+                ),
+            )
 
     async def _gather(s) -> DiveCoverage:
         return await _gather_coverage(
