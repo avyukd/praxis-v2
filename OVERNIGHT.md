@@ -3366,7 +3366,7 @@ Implications for the install sequence:
 - [x] `docs/observability-prompt.md` written
 - [x] Observability loop scheduled per D74 (running live)
 - [x] First manual iteration verified sane
-- [ ] Commit (infra unit files, scripts, prompts)
+- [x] Commit (infra unit files, scripts, prompts) — shipped across 2026-04-20
 
 ---
 
