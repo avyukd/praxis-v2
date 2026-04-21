@@ -146,6 +146,66 @@ class CleanupSessionsPayload(BaseModel):
     triggered_by: str = "scheduler"
 
 
+ResearchScopeType = Literal[
+    "company", "theme", "basket", "question", "crosscutting", "concept"
+]
+
+
+class OrchestrateResearchPayload(BaseModel):
+    prompt: str
+    investigation_handle: str
+    research_priority: int = 5
+    scope_type: ResearchScopeType | None = None
+    subject: str | None = None
+    themes: list[str] = []
+    concepts: list[str] = []
+    questions: list[str] = []
+    tickers: list[str] = []
+    entry_nodes: list[str] = []
+
+
+class GatherSourcesPayload(BaseModel):
+    investigation_handle: str
+    subject: str
+    queries: list[str]
+    related_nodes: list[str] = []
+    max_sources: int = 8
+
+
+class CompileResearchNodePayload(BaseModel):
+    investigation_handle: str
+    node_type: Literal["theme", "concept", "question", "basket"]
+    node_slug: str
+    subject: str
+    source_paths: list[str] = []
+    related_nodes: list[str] = []
+    tickers: list[str] = []
+
+
+class AnswerQuestionPayload(BaseModel):
+    investigation_handle: str
+    question_slug: str
+    research_priority: int = 5
+
+
+class ScreenCandidateCompaniesPayload(BaseModel):
+    investigation_handle: str
+    subject: str
+    tickers: list[str]
+    ranking_question: str
+    max_deep_dives: int = 3
+
+
+class SynthesizeCrosscutMemoPayload(BaseModel):
+    investigation_handle: str
+    memo_handle: str
+    subject: str
+    themes: list[str] = []
+    concepts: list[str] = []
+    questions: list[str] = []
+    tickers: list[str] = []
+
+
 class SurfaceIdeasPayload(BaseModel):
     triggered_by: str = "scheduler"
     focus: str | None = None
@@ -173,6 +233,12 @@ PAYLOAD_MODELS: dict[str, type[BaseModel]] = {
     "rate_limit_probe": RateLimitProbePayload,
     "cleanup_sessions": CleanupSessionsPayload,
     "surface_ideas": SurfaceIdeasPayload,
+    "orchestrate_research": OrchestrateResearchPayload,
+    "gather_sources": GatherSourcesPayload,
+    "compile_research_node": CompileResearchNodePayload,
+    "answer_question": AnswerQuestionPayload,
+    "screen_candidate_companies": ScreenCandidateCompaniesPayload,
+    "synthesize_crosscut_memo": SynthesizeCrosscutMemoPayload,
 }
 
 

@@ -61,7 +61,9 @@ class HandlerRegistry:
 def _build_registry() -> HandlerRegistry:
     from handlers import (
         analyze_filing,
+        answer_question,
         cleanup_sessions,
+        compile_research_node,
         compile_to_wiki,
         dive_business_moat,
         dive_capital_allocation,
@@ -70,14 +72,18 @@ def _build_registry() -> HandlerRegistry:
         dive_geopolitical_risk,
         dive_industry_structure,
         dive_macro,
+        gather_sources,
         generate_daily_journal,
         lint_vault,
         notify,
         orchestrate_dive,
+        orchestrate_research,
         rate_limit_probe,
         refresh_backlinks,
         refresh_index,
+        screen_candidate_companies,
         surface_ideas,
+        synthesize_crosscut_memo,
         synthesize_memo,
         ticker_index,
         triage_filing,
@@ -105,6 +111,12 @@ def _build_registry() -> HandlerRegistry:
     r.register("surface_ideas", surface_ideas.handle)
     r.register("refresh_backlinks", refresh_backlinks.handle)
     r.register("ticker_index", ticker_index.handle)
+    r.register("orchestrate_research", orchestrate_research.handle)
+    r.register("gather_sources", gather_sources.handle)
+    r.register("compile_research_node", compile_research_node.handle)
+    r.register("answer_question", answer_question.handle)
+    r.register("screen_candidate_companies", screen_candidate_companies.handle)
+    r.register("synthesize_crosscut_memo", synthesize_crosscut_memo.handle)
     return r
 
 

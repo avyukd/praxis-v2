@@ -74,31 +74,29 @@ async def read_investigation(handle: str) -> str:
 
 
 @mcp.tool()
-async def search_vault(query: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Grep the vault for a substring. Returns (path, snippet) pairs."""
+async def search_vault(
+    query: str,
+    limit: int = 10,
+    scope: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Ranked semantic-lite search over the vault's indexable areas.
+
+    Two-stage: keyword-overlap filter then Haiku rerank with rationales.
+    Falls back to stage-1 results on rerank failure / rate-limit.
+
+    `scope` optionally restricts which areas are searched. Valid values:
+    "themes", "questions", "concepts", "memos", "sources", "companies".
+    Omit for all-areas search.
+
+    Returns ranked hits with path, node_type, title, snippet,
+    relevance_score, why_relevant."""
+    from praxis_core.vault.memory import search_vault_memory
+
     settings = get_settings()
-    results: list[dict[str, Any]] = []
-    pattern = re.compile(re.escape(query), re.IGNORECASE)
-    for p in settings.vault_root.rglob("*.md"):
-        if any(part in {"_raw", "_analyzed", ".obsidian", ".cache"} for part in p.parts):
-            continue
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        m = pattern.search(text)
-        if m:
-            start = max(0, m.start() - 80)
-            end = min(len(text), m.end() + 80)
-            results.append(
-                {
-                    "path": str(p.relative_to(settings.vault_root)),
-                    "snippet": text[start:end].replace("\n", " "),
-                }
-            )
-            if len(results) >= limit:
-                break
-    return results
+    hits = await search_vault_memory(
+        settings.vault_root, query, limit=limit, scope=scope
+    )
+    return [h.to_dict() for h in hits]
 
 
 @mcp.tool()
@@ -297,6 +295,117 @@ async def show_steering() -> dict[str, Any]:
         "ok": True,
         "path": str(steering_path(settings.vault_root).relative_to(settings.vault_root)),
         "content": text or "(no steering entries yet)",
+    }
+
+
+@mcp.tool()
+async def research_query(
+    prompt: str,
+    research_priority: int = 5,
+) -> dict[str, Any]:
+    """Open-ended research entrypoint. Given a freeform prompt, the
+    system autonomously decomposes the topic, gathers web sources,
+    updates themes/questions/concepts, screens candidate companies,
+    kicks off selective ticker deep-dives, and produces a top-level
+    cross-cutting memo.
+
+    Examples:
+      research_query("research Strait of Hormuz impact on fertilizer
+        and best public equity beneficiaries")
+      research_query("AI data center power bottlenecks and the best
+        public beneficiaries", research_priority=8)
+      research_query("uranium enrichment bottlenecks and exposed
+        equities", research_priority=7)
+
+    research_priority (0-10) drives budget + depth. Default 5 =
+    standard research ($15 whole flow). 7-9 = deeper ($25-50).
+
+    Returns investigation handle + task id. Watch progress via
+    list_investigations / list_tasks."""
+    from praxis_core.time_et import et_date_str
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return {"ok": False, "error": "empty prompt"}
+    research_priority = max(0, min(10, int(research_priority)))
+
+    # Investigation handle: short slug from prompt + today
+    slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower()).strip("-")[:60] or "research"
+    handle = f"research-{slug}-{et_date_str().replace('-', '')}"
+    now_stamp = now_et().strftime("%H%M%S")
+    handle = f"{handle}-{now_stamp}"[:120]
+
+    async with session_scope() as session:
+        tid = await enqueue_task(
+            session,
+            task_type=TaskType.ORCHESTRATE_RESEARCH,
+            payload={
+                "prompt": prompt,
+                "investigation_handle": handle,
+                "research_priority": research_priority,
+            },
+            priority=1,  # observer-initiated
+            dedup_key=f"research:{handle}",
+        )
+    log.info(
+        "mcp.research_query",
+        handle=handle,
+        priority=research_priority,
+        prompt=prompt[:120],
+    )
+    return {
+        "ok": True,
+        "investigation_handle": handle,
+        "task_id": str(tid) if tid else None,
+        "research_priority": research_priority,
+    }
+
+
+@mcp.tool()
+async def persist_source(
+    url: str,
+    title: str,
+    body_text: str,
+    site: str | None = None,
+    publish_date: str | None = None,
+    investigation_handle: str | None = None,
+    related_nodes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Persist a web-fetched source into the vault's durable source
+    corpus (`_raw/manual/<today>/<slug>.md`). Called by research
+    workers (especially gather_sources) to save material sources.
+
+    Dedup by URL hash — calling with the same URL twice returns the
+    existing path without rewriting.
+
+    Args:
+      url: the source URL (required)
+      title: human-readable title (required)
+      body_text: the cleaned body text to persist (required)
+      site: hostname or publisher name (inferred from URL if omitted)
+      publish_date: ISO-ish date string, if known
+      investigation_handle: ties this source to a research run
+      related_nodes: wikilink targets (e.g. "themes/hormuz",
+        "questions/hormuz-fertilizer")
+    """
+    from praxis_core.vault.sources import persist_web_source
+
+    settings = get_settings()
+    path = persist_web_source(
+        settings.vault_root,
+        url=url,
+        title=title,
+        body_text=body_text,
+        site=site,
+        publish_date=publish_date,
+        investigation_handle=investigation_handle,
+        related_nodes=related_nodes or [],
+    )
+    if path is None:
+        return {"ok": True, "deduped": True, "path": None}
+    return {
+        "ok": True,
+        "deduped": False,
+        "path": str(path.relative_to(settings.vault_root)),
     }
 
 

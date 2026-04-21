@@ -28,6 +28,13 @@ class TaskType(StrEnum):
     # Wiki connectivity maintenance (no-LLM graph traversal)
     REFRESH_BACKLINKS = "refresh_backlinks"
     TICKER_INDEX = "ticker_index"
+    # Open-ended research engine (broad-topic prompts → cross-cutting memo)
+    ORCHESTRATE_RESEARCH = "orchestrate_research"
+    GATHER_SOURCES = "gather_sources"
+    COMPILE_RESEARCH_NODE = "compile_research_node"
+    ANSWER_QUESTION = "answer_question"
+    SCREEN_CANDIDATE_COMPANIES = "screen_candidate_companies"
+    SYNTHESIZE_CROSSCUT_MEMO = "synthesize_crosscut_memo"
 
 
 class TaskStatus(StrEnum):
@@ -69,6 +76,12 @@ MODEL_TIERS: dict[TaskType, TaskModel] = {
     TaskType.SURFACE_IDEAS: TaskModel.SONNET,
     TaskType.REFRESH_BACKLINKS: TaskModel.NONE,
     TaskType.TICKER_INDEX: TaskModel.NONE,
+    TaskType.ORCHESTRATE_RESEARCH: TaskModel.SONNET,
+    TaskType.GATHER_SOURCES: TaskModel.SONNET,
+    TaskType.COMPILE_RESEARCH_NODE: TaskModel.SONNET,
+    TaskType.ANSWER_QUESTION: TaskModel.SONNET,
+    TaskType.SCREEN_CANDIDATE_COMPANIES: TaskModel.SONNET,
+    TaskType.SYNTHESIZE_CROSSCUT_MEMO: TaskModel.OPUS,
 }
 
 
@@ -104,6 +117,17 @@ TASK_RESOURCE_KEYS: dict[TaskType, str | None] = {
     # These walk the whole vault; serialize to avoid parallel full-scans.
     TaskType.REFRESH_BACKLINKS: "wiki_mgmt",
     TaskType.TICKER_INDEX: "wiki_mgmt",
+    # Open-ended research. Keys are literal sentinels — the real resource
+    # families (theme:/question:/concept:/basket:/crosscutting:) are
+    # resolved per-task in enqueue._resource_key_for() because the target
+    # node slug lives in the payload, not the TaskType.
+    TaskType.ORCHESTRATE_RESEARCH: "investigation",
+    TaskType.GATHER_SOURCES: None,  # parallel retrieval OK
+    # compile/answer/synthesize map to node-specific keys via enqueue helper
+    TaskType.COMPILE_RESEARCH_NODE: "research_node",
+    TaskType.ANSWER_QUESTION: "research_node",
+    TaskType.SCREEN_CANDIDATE_COMPANIES: None,
+    TaskType.SYNTHESIZE_CROSSCUT_MEMO: "crosscutting",
 }
 
 

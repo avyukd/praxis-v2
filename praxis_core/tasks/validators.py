@@ -15,6 +15,8 @@ from praxis_core.schemas.artifacts import (
 )
 from praxis_core.schemas.payloads import (
     AnalyzeFilingPayload,
+    AnswerQuestionPayload,
+    CompileResearchNodePayload,
     CompileToWikiPayload,
     DiveCustomPayload,
     DiveSpecialistPayload,
@@ -22,8 +24,10 @@ from praxis_core.schemas.payloads import (
     LintVaultPayload,
     NotifyPayload,
     OrchestrateDivePayload,
+    OrchestrateResearchPayload,
     RefreshIndexPayload,
     SurfaceIdeasPayload,
+    SynthesizeCrosscutMemoPayload,
     SynthesizeMemoPayload,
     TriageFilingPayload,
 )
@@ -613,7 +617,131 @@ VALIDATORS: dict[str, ValidatorFn] = {
     TaskType.SURFACE_IDEAS.value: validate_surface_ideas,
     TaskType.REFRESH_BACKLINKS.value: validate_refresh_backlinks,
     TaskType.TICKER_INDEX.value: validate_ticker_index,
+    TaskType.ORCHESTRATE_RESEARCH.value: lambda p, v: validate_orchestrate_research(p, v),
+    TaskType.COMPILE_RESEARCH_NODE.value: lambda p, v: validate_compile_research_node(p, v),
+    TaskType.ANSWER_QUESTION.value: lambda p, v: validate_answer_question(p, v),
+    TaskType.SYNTHESIZE_CROSSCUT_MEMO.value: lambda p, v: validate_synthesize_crosscut_memo(p, v),
 }
+
+
+def _validate_md_frontmatter(path: Path) -> tuple[bool, str]:
+    if not path.exists():
+        return (False, "missing")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as e:
+        return (False, f"read: {e}")
+    if not text.startswith("---\n"):
+        return (False, "no frontmatter")
+    if "\n---\n" not in text:
+        return (False, "unclosed frontmatter")
+    return (True, "")
+
+
+def validate_orchestrate_research(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    payload = OrchestrateResearchPayload.model_validate(payload_raw)
+    inv_path = vc.investigation_path(vault_root, payload.investigation_handle)
+    ok_file, reason = _validate_md_frontmatter(inv_path)
+    spath = str(inv_path)
+    if ok_file:
+        return ValidationResult(ok=[spath])
+    if not inv_path.exists():
+        return ValidationResult(missing=[spath])
+    return ValidationResult(
+        malformed=[ValidationMalformed(path=spath, reason=reason)]
+    )
+
+
+def validate_compile_research_node(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    payload = CompileResearchNodePayload.model_validate(payload_raw)
+    if payload.node_type == "theme":
+        p = vault_root / "themes" / f"{payload.node_slug}.md"
+    elif payload.node_type == "concept":
+        p = vault_root / "concepts" / f"{payload.node_slug}.md"
+    elif payload.node_type == "question":
+        p = vault_root / "questions" / f"{payload.node_slug}.md"
+    else:
+        p = vault_root / "baskets" / f"{payload.node_slug}.md"
+    spath = str(p)
+    ok_file, reason = _validate_md_frontmatter(p)
+    if not ok_file:
+        if not p.exists():
+            return ValidationResult(missing=[spath])
+        return ValidationResult(malformed=[ValidationMalformed(path=spath, reason=reason)])
+    has_evidence = "## Evidence" in p.read_text(encoding="utf-8")
+    if not has_evidence:
+        return ValidationResult(
+            malformed=[ValidationMalformed(path=spath, reason="missing ## Evidence section")]
+        )
+    return ValidationResult(ok=[spath])
+
+
+def validate_answer_question(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    payload = AnswerQuestionPayload.model_validate(payload_raw)
+    p = vault_root / "questions" / f"{payload.question_slug}.md"
+    spath = str(p)
+    ok_file, reason = _validate_md_frontmatter(p)
+    if not ok_file:
+        if not p.exists():
+            return ValidationResult(missing=[spath])
+        return ValidationResult(malformed=[ValidationMalformed(path=spath, reason=reason)])
+    text = p.read_text(encoding="utf-8")
+    import frontmatter
+
+    try:
+        post = frontmatter.loads(text)
+        status = str(post.metadata.get("status") or "").lower()
+    except Exception:
+        status = ""
+    has_answer_section = "## Answer" in text
+    answer_populated = has_answer_section and "_Not yet answered._" not in text
+    ok = status in {"answered", "partial"} or (status == "open" and answer_populated)
+    if ok:
+        return ValidationResult(ok=[spath])
+    return ValidationResult(
+        malformed=[
+            ValidationMalformed(
+                path=spath,
+                reason=f"status={status!r}, has_answer_section={has_answer_section}",
+            )
+        ]
+    )
+
+
+def validate_synthesize_crosscut_memo(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
+    payload = SynthesizeCrosscutMemoPayload.model_validate(payload_raw)
+    memos_dir = vault_root / "memos"
+    matches = (
+        [p for p in memos_dir.glob(f"*-{payload.memo_handle}.md")]
+        if memos_dir.exists()
+        else []
+    )
+    missing_path = f"memos/*-{payload.memo_handle}.md"
+    if not matches:
+        return ValidationResult(missing=[missing_path])
+    p = matches[0]
+    spath = str(p)
+    ok_file, reason = _validate_md_frontmatter(p)
+    if not ok_file:
+        return ValidationResult(malformed=[ValidationMalformed(path=spath, reason=reason)])
+    text = p.read_text(encoding="utf-8")
+    required_sections = [
+        "## Thesis",
+        "## Evidence",
+        "## Equity ranking",
+        "## Known vs uncertain",
+    ]
+    missing_sections = [s for s in required_sections if s not in text]
+    if missing_sections:
+        return ValidationResult(
+            malformed=[
+                ValidationMalformed(
+                    path=spath,
+                    reason=f"missing sections: {missing_sections}",
+                )
+            ]
+        )
+    return ValidationResult(ok=[spath])
 
 
 def get_validator(task_type: str) -> ValidatorFn | None:

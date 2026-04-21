@@ -27,6 +27,23 @@ def _resource_key_for(task_type: TaskType, payload: dict[str, Any]) -> str | Non
         return f"investigation:{handle}"
     if kind in {"index", "lint", "journal", "cleanup", "surface_ideas", "wiki_mgmt"}:
         return f"{kind}:singleton"
+    if kind == "research_node":
+        # Key by (node_type, node_slug OR question_slug) so two tasks touching
+        # the same theme/question/concept file can't race. Falls back to
+        # investigation handle if the payload is missing the slug.
+        node_type = payload.get("node_type")
+        slug = payload.get("node_slug") or payload.get("question_slug")
+        if node_type and slug:
+            return f"{node_type}:{slug}"
+        handle = payload.get("investigation_handle")
+        if handle:
+            return f"investigation:{handle}"
+        return None
+    if kind == "crosscutting":
+        handle = payload.get("investigation_handle")
+        if not handle:
+            return None
+        return f"crosscutting:{handle}"
     return None
 
 
