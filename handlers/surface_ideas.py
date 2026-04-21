@@ -28,7 +28,6 @@ from sqlalchemy import select, text
 
 from handlers import HandlerContext, HandlerResult
 from handlers._common import run_llm
-from handlers.prompts.surface_ideas import SYSTEM_PROMPT
 from handlers.prompts.surface_modes import (
     QUESTION_PURSUIT_PROMPT,
     RANDOM_EXPLORATION_PROMPT,

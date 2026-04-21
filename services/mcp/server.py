@@ -26,6 +26,7 @@ from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.constitution import (
+    append_principle,
     constitution_path,
     read_constitution,
     remove_principle,
@@ -196,29 +197,27 @@ async def show_constitution() -> dict[str, Any]:
 
 
 @mcp.tool()
-async def append_principle(
+async def add_principle(
     rule: str, section: str = "What to favor"
 ) -> dict[str, Any]:
-    """Append a principle (rule / bullet) to the analyst constitution.
+    """Add a principle (rule / bullet) to the analyst constitution.
     The constitution flows into every Opus/Sonnet prompt so refinements
     here ripple across all research.
 
     Examples:
-      append_principle("Skip merger-arb setups with < 5% upside — low
+      add_principle("Skip merger-arb setups with < 5% upside — low
         alpha, not our edge", section="What to skip")
-      append_principle("Favor micro-caps $50M-$500M where primary
+      add_principle("Favor micro-caps $50M-$500M where primary
         research reliably beats consensus", section="What to favor")
-      append_principle("Always surface downside symmetrically in every
+      add_principle("Always surface downside symmetrically in every
         memo — no cheerleading", section="Style + conduct")
 
     Creates the section if it doesn't exist. Exact-duplicate bullets are
     dedup'd. Section names are free-form — typical ones are
     'What to skip', 'What to favor', 'Style + conduct', 'Universe',
     'Process'."""
-    from praxis_core.vault.constitution import append_principle as _append
-
     settings = get_settings()
-    path = _append(settings.vault_root, rule, section=section)
+    path = append_principle(settings.vault_root, rule, section=section)
     return {
         "ok": True,
         "path": str(path.relative_to(settings.vault_root)),
@@ -886,16 +885,22 @@ async def file_to_vault(
 ) -> dict[str, Any]:
     """Write content to a path within the vault atomically. Use for filing chat results."""
     settings = get_settings()
+    vault_root = settings.vault_root.resolve()
     p = settings.vault_root / path
+    # Resolve the parent (which must already exist lexically) to catch
+    # symlinks pointing outside the vault. The file itself may not
+    # exist yet, so we can't resolve(strict=True) on p directly.
+    parent_resolved = p.parent.resolve() if p.parent.exists() else (vault_root / p.parent.relative_to(settings.vault_root)).resolve()
     try:
-        p.relative_to(settings.vault_root)
+        parent_resolved.relative_to(vault_root)
     except ValueError:
-        return {"ok": False, "error": "path escapes vault"}
-    if any(part in {"_raw", "_analyzed"} for part in p.parts):
+        return {"ok": False, "error": "path escapes vault (symlink or ..)"}
+    final = parent_resolved / p.name
+    if any(part in {"_raw", "_analyzed"} for part in final.parts):
         return {"ok": False, "error": "cannot write to _raw or _analyzed"}
-    atomic_write(p, content)
+    atomic_write(final, content)
     await emit_event("mcp.server", "file_to_vault", {"path": path, "linked": linked_nodes or []})
-    return {"ok": True, "path": str(p.relative_to(settings.vault_root))}
+    return {"ok": True, "path": str(final.relative_to(vault_root))}
 
 
 @mcp.tool()
