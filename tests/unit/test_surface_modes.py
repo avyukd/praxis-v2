@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 
+import frontmatter
 import pytest
 
 from handlers.surface_ideas import (
     MODE_WEIGHTS,
+    _active_themes,
+    _open_questions,
     _pick_mode,
     _wrap_user_prompt,
 )
@@ -97,3 +101,23 @@ def test_mode_weights_is_nonempty_and_total_positive():
     """Config sanity — if someone empties MODE_WEIGHTS the picker degrades quietly."""
     assert MODE_WEIGHTS, "MODE_WEIGHTS must not be empty"
     assert sum(w for _, w in MODE_WEIGHTS) > 0
+
+
+def test_active_themes_handles_scalar_tag_metadata(tmp_path: Path):
+    theme = tmp_path / "themes" / "macro.md"
+    theme.parent.mkdir(parents=True, exist_ok=True)
+    post = frontmatter.Post("body", **{"title": "Macro", "tags": "macro"})
+    theme.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+    out = _active_themes(tmp_path)
+
+    assert out[0]["tags"] == ["macro"]
+
+
+def test_open_questions_handles_non_string_status(tmp_path: Path):
+    question = tmp_path / "questions" / "q1.md"
+    question.parent.mkdir(parents=True, exist_ok=True)
+    post = frontmatter.Post("# Q1\n\nbody", **{"status": ["open"]})
+    question.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+    assert _open_questions(tmp_path) == ["q1"]

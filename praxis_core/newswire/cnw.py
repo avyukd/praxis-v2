@@ -24,6 +24,16 @@ _TICKER_RE = re.compile(
 )
 
 
+def _href_as_str(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and item:
+                return item
+    return ""
+
+
 @retry(wait=wait_exponential(multiplier=1, min=2, max=30), stop=stop_after_attempt(3))
 async def _http_get(url: str) -> str:
     await NEWSWIRE_RATE.consume()
@@ -70,7 +80,9 @@ def parse_cnw_listing(html: str) -> list[PressRelease]:
         a = card.find("a", href=True)
         if not a:
             continue
-        href = a["href"]
+        href = _href_as_str(a.get("href"))
+        if not href:
+            continue
         if not href.startswith("http"):
             href = CNW_BASE + href
 

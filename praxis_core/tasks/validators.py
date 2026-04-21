@@ -37,6 +37,10 @@ from praxis_core.vault import conventions as vc
 ValidatorFn = Callable[[dict[str, Any], Path], ValidationResult]
 
 
+def _custom_specialty_slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "custom"
+
+
 def _check_file_exists(path: Path) -> tuple[str, bool]:
     return (str(path), path.exists() and path.is_file())
 
@@ -520,10 +524,8 @@ def validate_dive_macro(payload_raw: dict[str, Any], vault_root: Path) -> Valida
 
 
 def validate_dive_custom(payload_raw: dict[str, Any], vault_root: Path) -> ValidationResult:
-    from handlers.dive_custom import _slugify
-
     payload = DiveCustomPayload.model_validate(payload_raw)
-    specialty_slug = _slugify(payload.specialty)
+    specialty_slug = _custom_specialty_slug(payload.specialty)
     return _validate_specialist_dive(payload_raw, vault_root, specialty_slug)
 
 

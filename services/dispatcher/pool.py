@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from dataclasses import dataclass
+from typing import Any
 
 from praxis_core.db.models import Task
 from praxis_core.logging import get_logger
@@ -37,7 +39,12 @@ class WorkerPool:
         self._worker_seq += 1
         return f"worker-{self._worker_seq:04d}"
 
-    async def submit(self, task: Task, coro, worker_id: str | None = None) -> RunningTask:
+    async def submit(
+        self,
+        task: Task,
+        coro: Coroutine[Any, Any, Any],
+        worker_id: str | None = None,
+    ) -> RunningTask:
         async with self._lock:
             if worker_id is None:
                 worker_id = self.alloc_worker_id()

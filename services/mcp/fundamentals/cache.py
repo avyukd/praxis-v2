@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,20 +89,20 @@ async def cache_mark_error(
     )
 
 
-async def with_cache(
+async def with_cache[T: (dict[str, Any], list[Any])](
     ticker: str,
     method: str,
     params: dict[str, Any],
-    fetch_fn,
+    fetch_fn: Callable[[], T],
     ttl: timedelta = DEFAULT_TTL,
-) -> dict[str, Any] | list[Any]:
+) -> T:
     """Read-through cache. fetch_fn is a sync callable returning the value."""
     import asyncio
 
     async with session_scope() as session:
         cached = await cache_get(session, ticker, method, params, ttl)
         if cached is not None:
-            return cached
+            return cast(T, cached)
 
     try:
         value = await asyncio.to_thread(fetch_fn)

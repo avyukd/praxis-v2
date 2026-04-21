@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import frontmatter
 import pytest
 
 from praxis_core.vault.followups import load_open_followups, write_followup
@@ -144,3 +145,20 @@ def test_write_without_ticker_still_works(vault):
     assert p is not None
     text = p.read_text()
     assert "ticker:" not in text or "ticker: \n" in text or "ticker: null" in text
+
+
+def test_load_open_followups_handles_non_string_status(vault):
+    p = write_followup(
+        vault,
+        title="Odd metadata question",
+        body="Context",
+        origin_task_type="dive_macro",
+        ticker="FOO",
+    )
+    assert p is not None
+    post = frontmatter.load(str(p))
+    post.metadata["status"] = ["open"]
+    p.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+    fups = load_open_followups(vault, limit=10)
+    assert any(f["title"] == "Odd metadata question" for f in fups)

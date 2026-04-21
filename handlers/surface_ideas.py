@@ -67,6 +67,18 @@ MODE_WEIGHTS: list[tuple[str, int]] = [
 ]
 
 
+def _meta_text(value: object, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _meta_list_of_str(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None]
+    return []
+
+
 def _hash_evidence(evidence: list[str]) -> str:
     joined = "\x1f".join(sorted(evidence))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
@@ -100,8 +112,8 @@ def _active_themes(vault_root: Path, max_age_days: int = 30) -> list[dict[str, A
         out.append(
             {
                 "slug": p.stem,
-                "title": post.metadata.get("title") or p.stem.replace("-", " ").title(),
-                "tags": list(post.metadata.get("tags") or []),
+                "title": _meta_text(post.metadata.get("title"), p.stem.replace("-", " ").title()),
+                "tags": _meta_list_of_str(post.metadata.get("tags")),
                 "summary_first_200": (post.content or "")[:200].replace("\n", " "),
                 "path": str(p.relative_to(vault_root)),
             }
@@ -126,7 +138,7 @@ def _open_questions(vault_root: Path) -> list[str]:
             post = frontmatter.load(str(p))
         except Exception:
             continue
-        if (post.metadata.get("status") or "open").lower() != "resolved":
+        if _meta_text(post.metadata.get("status"), "open").lower() != "resolved":
             out.append(p.stem)
     return out
 
@@ -380,7 +392,7 @@ def _companies_tagged_with_theme(vault_root: Path, theme_slug: str) -> list[str]
             post = frontmatter.load(str(notes))
         except Exception:
             continue
-        tags = post.metadata.get("tags") or []
+        tags = _meta_list_of_str(post.metadata.get("tags"))
         if any(theme_slug in str(t) or theme_tag in str(t) for t in tags):
             tickers.add(d.name.upper())
     return sorted(tickers)

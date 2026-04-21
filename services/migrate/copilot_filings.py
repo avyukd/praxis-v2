@@ -363,6 +363,9 @@ async def _import_press(
     if not analysis or not index:
         report.press_skipped_malformed += 1
         return
+    if not ticker:
+        report.press_skipped_malformed += 1
+        return
 
     analyzed_dir = vc.analyzed_pr_dir(vault_root, src_name, ticker, release_id)
     analysis_md_path = analyzed_dir / "analysis.md"

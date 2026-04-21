@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import traceback
 import uuid
+from collections.abc import Coroutine
+from typing import cast
 
 from handlers import HandlerContext, HandlerResult, get_handler_registry
 from praxis_core.config import get_settings
@@ -138,7 +140,8 @@ async def execute_task(task: Task, worker_id: str) -> None:
 
         # D31.b: race handler against cancel_event. On cancel, propagate
         # CancelledError into the handler → CLIInvoker's finally kills subproc.
-        handler_task = asyncio.create_task(handler(ctx))
+        handler_coro = cast(Coroutine[object, object, HandlerResult], handler(ctx))
+        handler_task = asyncio.create_task(handler_coro)
         cancel_waiter = asyncio.create_task(cancel_event.wait())
         # Worker-level wall timeout sits ABOVE the CLI invoker's own
         # timeout so the invoker's SIGTERM grace window (60s) + SIGKILL

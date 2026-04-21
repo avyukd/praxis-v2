@@ -21,6 +21,10 @@ from praxis_core.vault.writer import write_markdown_with_frontmatter
 log = get_logger("vault.followups")
 
 
+def _meta_text(value: object, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
 def _slugify(title: str, max_len: int = 80) -> str:
     s = re.sub(r"[^a-z0-9\s-]", "", title.lower())
     s = re.sub(r"\s+", "-", s).strip("-")
@@ -111,7 +115,7 @@ def load_open_followups(
         except Exception:
             continue
         meta = post.metadata or {}
-        if (meta.get("status") or "open").lower() not in ("open", "active"):
+        if _meta_text(meta.get("status"), "open").lower() not in ("open", "active"):
             continue
         body = (post.content or "").strip()
         title = body.splitlines()[0].lstrip("# ").strip() if body else p.stem

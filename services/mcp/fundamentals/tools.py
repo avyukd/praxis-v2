@@ -202,7 +202,7 @@ async def get_earnings(ticker: str, count: int = 8) -> list[dict[str, Any]]:
             return []
         out: list[dict[str, Any]] = []
         for ts, row in df.head(count).iterrows():
-            ts_iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+            ts_iso = str(ts)
             item: dict[str, Any] = {"date": ts_iso}
             for col, v in row.items():
                 try:
