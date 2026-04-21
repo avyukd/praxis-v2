@@ -32,6 +32,7 @@ from praxis_core.vault.constitution import (
     remove_principle,
     replace_constitution,
 )
+from praxis_core.vault.memory import Scope, search_vault_memory
 from praxis_core.vault.steering import append_steering, recent_steering, steering_path
 from praxis_core.vault.writer import atomic_write
 
@@ -91,14 +92,23 @@ async def search_vault(
 
     Returns ranked hits with path, node_type, title, snippet,
     relevance_score, why_relevant."""
-    from praxis_core.vault.memory import search_vault_memory
-
     settings = get_settings()
     # Clamp caller-supplied limit. Too-large values blow out the Haiku
     # rerank prompt and stage-1 scoring budget.
     bounded_limit = max(1, min(int(limit or 10), 50))
+    normalized_scope: list[Scope] | None = None
+    if scope:
+        allowed: set[Scope] = {
+            "themes",
+            "questions",
+            "concepts",
+            "memos",
+            "sources",
+            "companies",
+        }
+        normalized_scope = [s for s in scope if s in allowed]  # type: ignore[list-item]
     hits = await search_vault_memory(
-        settings.vault_root, query, limit=bounded_limit, scope=scope
+        settings.vault_root, query, limit=bounded_limit, scope=normalized_scope
     )
     return [h.to_dict() for h in hits]
 
@@ -908,14 +918,14 @@ async def file_to_vault(
 
 @mcp.tool()
 async def ingest_source(content: str, title: str, source_hint: str | None = None) -> dict[str, Any]:
-    """Ingest human-provided content into _raw/manual/ and enqueue compile."""
+    """Ingest human-provided content into _inbox_manual/ for manual triage."""
     import hashlib
 
     settings = get_settings()
     dedup = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
     dt = now_et()
     slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", title.lower()).strip("-") or "ingested"
-    target = vc.raw_manual_path(settings.vault_root, dt, f"{slug}-{dedup}")
+    target = vc.inbox_manual_path(settings.vault_root, dt, f"{slug}-{dedup}")
 
     async with session_scope() as session:
         stmt = (
@@ -944,13 +954,6 @@ async def ingest_source(content: str, title: str, source_hint: str | None = None
 
     rel = str(target.relative_to(settings.vault_root))
     async with session_scope() as session:
-        await enqueue_task(
-            session,
-            task_type=TaskType.COMPILE_TO_WIKI,
-            payload={"source_kind": "manual_source", "analysis_path": rel},
-            priority=3,
-            dedup_key=f"compile_manual:{dedup}",
-        )
         await emit_event("mcp.server", "ingest_source", {"path": rel, "title": title})
 
     return {"ok": True, "path": rel}

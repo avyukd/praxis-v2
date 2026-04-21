@@ -14,8 +14,6 @@ from praxis_core.db.session import session_scope
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
-from praxis_core.schemas.task_types import TaskType
-from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.writer import atomic_write
@@ -52,7 +50,7 @@ async def _process_file(file_path: Path) -> bool:
     dedup = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
     dt = now_et()
     slug = _slugify(file_path.name)
-    target = vc.raw_manual_path(settings.vault_root, dt, f"{slug}-{dedup}")
+    target = vc.inbox_manual_path(settings.vault_root, dt, f"{slug}-{dedup}")
 
     async with session_scope() as session:
         stmt = (
@@ -97,18 +95,6 @@ async def _process_file(file_path: Path) -> bool:
     atomic_write(target, body)
 
     rel = str(target.relative_to(settings.vault_root))
-    async with session_scope() as session:
-        await enqueue_task(
-            session,
-            task_type=TaskType.COMPILE_TO_WIKI,
-            payload={
-                "source_kind": "manual_source",
-                "analysis_path": rel,
-            },
-            priority=3,  # P3 for human drops
-            dedup_key=f"compile_manual:{dedup}",
-        )
-
     try:
         file_path.unlink()
     except OSError:

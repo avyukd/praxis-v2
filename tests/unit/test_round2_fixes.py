@@ -8,14 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from handlers import HandlerContext, analyze_filing, compile_to_wiki, notify
+from handlers import HandlerContext, analyze_filing, notify
 from handlers import _common as common
+from praxis_core.config import Settings
 from praxis_core.llm.invoker import LLMResult
 from praxis_core.schemas.artifacts import AnalysisResult
 from praxis_core.schemas.payloads import AnalyzeFilingPayload
 from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import _resource_key_for
-from praxis_core.tasks.validators import validate_compile_to_wiki
+from services.mcp import server as mcp_server
+from services.pollers import inbox_watcher
 
 
 @pytest.mark.asyncio
@@ -52,51 +54,92 @@ def test_resource_key_singletons_round2():
 
 
 @pytest.mark.asyncio
-async def test_compile_manual_source_prompt_avoids_unknown(
+async def test_ingest_source_routes_to_inbox_manual_without_compile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    captured: dict[str, str] = {}
-
-    async def _fake_run_llm(**kwargs):  # type: ignore[no-untyped-def]
-        captured["user_prompt"] = kwargs["user_prompt"]
-        return LLMResult(
-            text="ok",
-            duration_s=0.01,
-            finish_reason="stop",
-            model="sonnet",
-            invoker="cli",
-        )
-
-    monkeypatch.setattr(compile_to_wiki, "run_llm", _fake_run_llm)
-    monkeypatch.setattr(compile_to_wiki, "read_vault_schema", lambda _v: "")
-
-    ctx = HandlerContext(
-        task_id=str(uuid.uuid4()),
-        task_type=TaskType.COMPILE_TO_WIKI.value,
-        payload={"source_kind": "manual_source", "analysis_path": "_raw/manual/a.md"},
-        vault_root=tmp_path,
-        model=TaskModel.SONNET.value,
-        session=None,
+    vault_root = tmp_path / "vault"
+    settings = Settings(
+        vault_root=vault_root,
+        inbox_root=tmp_path / "inbox",
+        log_dir=tmp_path / "logs",
     )
-    result = await compile_to_wiki.handle(ctx)
-    assert result.ok
-    assert "manual/sources.md" in captured["user_prompt"]
-    assert "Ticker:" not in captured["user_prompt"]
+    seen_events: list[tuple[str, str, dict[str, object]]] = []
+
+    class _DummySession:
+        async def execute(self, _stmt):  # type: ignore[no-untyped-def]
+            return None
+
+    @asynccontextmanager
+    async def _fake_session_scope():
+        yield _DummySession()
+
+    async def _fake_emit_event(component: str, name: str, payload: dict[str, object]) -> None:
+        seen_events.append((component, name, payload))
+
+    async def _should_not_enqueue(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("manual ingest should not enqueue compile_to_wiki")
+
+    monkeypatch.setattr(mcp_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(mcp_server, "session_scope", _fake_session_scope)
+    monkeypatch.setattr(mcp_server, "emit_event", _fake_emit_event)
+    monkeypatch.setattr(mcp_server, "enqueue_task", _should_not_enqueue)
+
+    result = await mcp_server.ingest_source("hello world", "Manual note", source_hint="email")
+
+    assert result["ok"] is True
+    path = result["path"]
+    assert path.startswith("_inbox_manual/")
+    stored = vault_root / path
+    assert stored.exists()
+    assert "source_kind: manual_ingest" in stored.read_text(encoding="utf-8")
+    assert any(name == "ingest_source" for _, name, _ in seen_events)
 
 
-def test_validate_compile_to_wiki_manual_source_without_ticker(tmp_path: Path):
-    (tmp_path / "LOG.md").write_text("# log\n", encoding="utf-8")
-    (tmp_path / "manual").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "manual" / "sources.md").write_text(
-        "Manual source note with [[_raw/manual/2026-04-20/manual-abc.md]]\n",
-        encoding="utf-8",
+@pytest.mark.asyncio
+async def test_inbox_watcher_routes_manual_drops_to_inbox_manual(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    vault_root = tmp_path / "vault"
+    inbox_root = tmp_path / "incoming"
+    inbox_root.mkdir(parents=True, exist_ok=True)
+    settings = Settings(
+        vault_root=vault_root,
+        inbox_root=inbox_root,
+        log_dir=tmp_path / "logs",
     )
-    payload = {
-        "source_kind": "manual_source",
-        "analysis_path": "_raw/manual/2026-04-20/manual-abc.md",
-    }
-    r = validate_compile_to_wiki(payload, tmp_path)
-    assert r.is_success
+    dropped = inbox_root / "Company update.txt"
+    dropped.write_text("plain text body", encoding="utf-8")
+    seen_events: list[tuple[str, str, dict[str, object]]] = []
+
+    class _InsertResult:
+        def first(self) -> object:
+            return object()
+
+    class _DummySession:
+        async def execute(self, _stmt):  # type: ignore[no-untyped-def]
+            return _InsertResult()
+
+    @asynccontextmanager
+    async def _fake_session_scope():
+        yield _DummySession()
+
+    async def _fake_emit_event(component: str, name: str, payload: dict[str, object]) -> None:
+        seen_events.append((component, name, payload))
+
+    monkeypatch.setattr(inbox_watcher, "get_settings", lambda: settings)
+    monkeypatch.setattr(inbox_watcher, "session_scope", _fake_session_scope)
+    monkeypatch.setattr(inbox_watcher, "emit_event", _fake_emit_event)
+
+    processed = await inbox_watcher._process_file(dropped)
+
+    assert processed is True
+    assert not dropped.exists()
+    targets = list((vault_root / "_inbox_manual").rglob("*.md"))
+    assert len(targets) == 1
+    text = targets[0].read_text(encoding="utf-8")
+    assert "source_kind: manual" in text
+    assert "original_name: 'Company update.txt'" in text
+    assert any(name == "manual_ingested" for _, name, _ in seen_events)
 
 
 @pytest.mark.asyncio
