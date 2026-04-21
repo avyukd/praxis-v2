@@ -28,3 +28,4 @@ node_modules/
 .coverage
 htmlcov/
 .claude/scheduled_tasks.lock
+scratch/
