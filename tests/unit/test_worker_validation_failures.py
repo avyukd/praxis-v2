@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import Any, cast
+from uuid import uuid4
+
+import pytest
+
 from praxis_core.schemas.artifacts import ValidationMalformed, ValidationResult
-from services.dispatcher.worker import validation_failure_reason
+from services.dispatcher import worker
+from services.dispatcher.worker import requeue_canceled_task, validation_failure_reason
 
 
 def test_validation_failure_reason_prefers_malformed_details() -> None:
@@ -28,3 +36,45 @@ def test_validation_failure_reason_uses_missing_paths_when_present() -> None:
         validation_failure_reason(validation)
         == "artifacts missing: ['/tmp/company/dives/capital-allocation.md']"
     )
+
+
+@pytest.mark.asyncio
+async def test_requeue_canceled_task_releases_running_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    released: dict[str, object] = {}
+    emitted: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def _fake_session_scope():
+        yield object()
+
+    async def _fake_release_task(session, task_id, backoff_s=30):  # type: ignore[no-untyped-def]
+        released["session"] = session
+        released["task_id"] = task_id
+        released["backoff_s"] = backoff_s
+
+    async def _fake_emit_event(component, event_type, payload, session=None):  # type: ignore[no-untyped-def]
+        emitted["component"] = component
+        emitted["event_type"] = event_type
+        emitted["payload"] = payload
+        emitted["session"] = session
+
+    monkeypatch.setattr(worker, "session_scope", _fake_session_scope)
+    monkeypatch.setattr(worker, "release_task", _fake_release_task)
+    monkeypatch.setattr(worker, "emit_event", _fake_emit_event)
+
+    task_id = uuid4()
+    task = cast(Any, SimpleNamespace(id=task_id, type="surface_ideas"))
+
+    await requeue_canceled_task(task, backoff_s=7)
+
+    assert released["task_id"] == task_id
+    assert released["backoff_s"] == 7
+    assert emitted["component"] == "dispatcher.worker"
+    assert emitted["event_type"] == "task_shutdown_requeued"
+    assert emitted["payload"] == {
+        "task_id": str(task_id),
+        "type": "surface_ideas",
+        "backoff_s": 7,
+    }
