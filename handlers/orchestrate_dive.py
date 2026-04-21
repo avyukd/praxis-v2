@@ -228,6 +228,19 @@ may skip that specialty. Err on running the dive when in doubt.
     else:
         plan_types = default_plan
 
+    # dive_custom requires a `specialty` field in its payload that the plan
+    # parser can't extract from free-text markdown. Until parsing catches
+    # up, drop dive_custom from plans so the ValidationError doesn't DL the
+    # whole orchestrate_dive task. Other specialists in the same plan still
+    # run — better to lose one bespoke dive than the entire investigation.
+    if TaskType.DIVE_CUSTOM in plan_types:
+        plan_types = [t for t in plan_types if t != TaskType.DIVE_CUSTOM]
+        log.warning(
+            "orchestrate_dive.dropped_dive_custom",
+            task_id=ctx.task_id,
+            reason="specialty extraction not yet wired through plan parser",
+        )
+
     # D24 coverage skip: if fresh themes/concepts already cover the
     # geopolitical or macro dimensions, drop those specialists from the
     # plan to avoid re-deriving content that's already in the vault.

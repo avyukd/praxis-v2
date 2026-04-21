@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import re
@@ -445,6 +446,14 @@ async def run_loop() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--once", action="store_true", help="poll once and exit (for smoke test)")
+    args = parser.parse_args()
+    if args.once:
+        configure_logging()
+        count = asyncio.run(poll_once())
+        log.info("edgar_8k.once", ingested=count)
+        return
     asyncio.run(run_loop())
 
 

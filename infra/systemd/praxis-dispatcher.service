@@ -4,7 +4,9 @@ After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=120
 User=avyuk
 Group=avyuk
 WorkingDirectory=/home/avyuk/dev/praxis-v2

@@ -10,6 +10,7 @@ from praxis_core.llm.rate_limit import RateLimitManager
 from praxis_core.logging import configure_logging, get_logger
 from praxis_core.observability.events import emit_event
 from praxis_core.observability.heartbeat import beat
+from praxis_core.observability.sd_notify import notify_ready, notify_stopping, notify_watchdog
 from praxis_core.schemas.task_types import TaskModel, TaskType
 from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.tasks.lifecycle import claim_next_task
@@ -115,12 +116,14 @@ async def run_loop() -> None:
         "started",
         {"pool_size": settings.dispatcher_pool_size, "invoker": settings.praxis_invoker},
     )
+    notify_ready()
 
     tick_count = 0
     while not stop_event.is_set():
         tick_count += 1
         try:
             assigned = await _dispatch_tick(pool)
+            notify_watchdog()
             await beat(
                 "dispatcher.main",
                 status={
@@ -148,6 +151,7 @@ async def run_loop() -> None:
             pass
 
     log.info("dispatcher.shutdown", draining=len(pool.running_tasks()))
+    notify_stopping()
     await pool.drain(timeout_s=30)
     await emit_event("dispatcher.main", "shutdown", {"tick_count": tick_count})
     log.info("dispatcher.done")

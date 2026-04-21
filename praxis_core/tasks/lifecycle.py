@@ -270,19 +270,33 @@ async def requeue_on_rate_limit(session: AsyncSession, task_id: uuid.UUID) -> No
     log.info("task.requeued.rate_limit", task_id=str(task_id))
 
 
-async def release_task(session: AsyncSession, task_id: uuid.UUID) -> None:
-    """Cooperative release — put back to queued without incrementing attempts."""
+async def release_task(
+    session: AsyncSession, task_id: uuid.UUID, backoff_s: int = 30
+) -> None:
+    """Cooperative release — put back to queued without consuming an attempt.
+
+    Decrements attempts because claim_next_task unconditionally increments
+    on every claim. Without the decrement, a task that transient-retries
+    N times ends up with attempts=N+1, visible as "N retries" and burning
+    through max_attempts on legitimate cooperative waits.
+
+    Sets lease_expires_at = now() + backoff_s with lease_holder=NULL so the
+    claim query (which skips tasks whose lease_expires_at is in the future)
+    won't immediately re-grab it. Prevents the 2s-tick spin where a
+    synthesize_memo waiting on a 5-min dive burns 150 claims + handler runs.
+    """
     await session.execute(
         text(
             """
             UPDATE tasks
             SET status = 'queued',
                 lease_holder = NULL,
-                lease_expires_at = NULL
+                lease_expires_at = now() + :backoff_s * interval '1 second',
+                attempts = GREATEST(0, attempts - 1)
             WHERE id = :task_id AND status = 'running'
             """
         ),
-        {"task_id": task_id},
+        {"task_id": task_id, "backoff_s": backoff_s},
     )
 
 
