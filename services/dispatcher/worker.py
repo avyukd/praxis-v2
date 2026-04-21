@@ -301,10 +301,12 @@ async def execute_task(task: Task, worker_id: str) -> None:
 
                 # Probe tasks are single-use signals. record_hit above already
                 # updated rate_limit_state; requeueing the probe would accumulate
-                # stale probes (seen 7 queued at once). Mark failed and let the
-                # next _maybe_launch_probe cycle spawn a fresh one.
+                # stale probes (seen 7 queued at once). A probe observing
+                # continued limiting is an expected control-plane outcome, not
+                # a task failure, so mark it success and let the next
+                # _maybe_launch_probe cycle spawn a fresh one.
                 if task.type == TaskType.RATE_LIMIT_PROBE.value:
-                    await mark_failed(session, task.id, "probe observed upstream rate_limit")
+                    await mark_success(session, task.id)
                     await emit_event(
                         "dispatcher.worker",
                         "task_rate_limit",
@@ -312,6 +314,7 @@ async def execute_task(task: Task, worker_id: str) -> None:
                             "task_id": str(task.id),
                             "type": task.type,
                             "probe_single_use": True,
+                            "probe_outcome": "still_limited",
                         },
                         session=session,
                     )
