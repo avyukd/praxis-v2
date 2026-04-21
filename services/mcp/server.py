@@ -454,6 +454,14 @@ async def open_investigation(
     """
     if not ticker and not theme:
         return {"ok": False, "error": "provide either ticker or theme"}
+    if theme and not ticker:
+        return {
+            "ok": False,
+            "error": (
+                "theme investigations are not yet supported for execution; "
+                "open a ticker-scoped investigation for now"
+            ),
+        }
 
     handle_base = ticker.lower() if ticker else (theme or "").lower().replace(" ", "-")
     handle = f"{handle_base}-{now_et().strftime('%Y%m%d%H%M')}"
