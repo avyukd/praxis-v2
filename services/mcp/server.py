@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import uuid
 from datetime import timedelta
@@ -1052,8 +1053,19 @@ async def requeue_dead_letter(dead_letter_id: str, reset_attempts: bool = True) 
 
 def main() -> None:
     configure_logging()
-    log.info("mcp.start")
-    mcp.run()
+    transport = (os.environ.get("PRAXIS_MCP_TRANSPORT") or "stdio").strip().lower()
+    mount_path = (os.environ.get("PRAXIS_MCP_MOUNT_PATH") or "").strip() or None
+    log.info("mcp.start", transport=transport, mount_path=mount_path)
+    if transport == "stdio":
+        mcp.run("stdio")
+        return
+    if transport == "sse":
+        mcp.run("sse", mount_path=mount_path)
+        return
+    if transport == "streamable-http":
+        mcp.run("streamable-http")
+        return
+    raise ValueError(f"unsupported PRAXIS_MCP_TRANSPORT: {transport}")
 
 
 if __name__ == "__main__":

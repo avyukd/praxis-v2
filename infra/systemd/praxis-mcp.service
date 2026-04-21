@@ -8,6 +8,7 @@ User=avyuk
 Group=avyuk
 WorkingDirectory=/home/avyuk/dev/praxis-v2
 EnvironmentFile=/home/avyuk/dev/praxis-v2/.env
+Environment=PRAXIS_MCP_TRANSPORT=streamable-http
 ExecStart=/home/avyuk/dev/praxis-v2/.venv/bin/python -m services.mcp.server
 Restart=always
 RestartSec=10
