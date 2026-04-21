@@ -165,6 +165,44 @@ def validate_compile_to_wiki(payload_raw: dict[str, Any], vault_root: Path) -> V
     s_log, log_exists = _check_file_exists(vc.log_path(vault_root))
     (ok if log_exists else missing).append(s_log)
 
+    if payload.source_kind == "manual_source" and not payload.ticker:
+        manual_sources = vault_root / "manual" / "sources.md"
+        s_manual, manual_exists = _check_file_exists(manual_sources)
+        if manual_exists:
+            text_body = manual_sources.read_text(encoding="utf-8", errors="replace")
+            if len(text_body) < 50:
+                malformed.append(
+                    ValidationMalformed(
+                        path=s_manual,
+                        reason="manual/sources.md too small (<50 chars)",
+                    )
+                )
+            else:
+                wl_pattern = _re.escape(payload.analysis_path)
+                wl_match = _re.search(
+                    rf"\[\[{wl_pattern}(?:\|[^\]]+)?(?:#[^\]]+)?\]\]", text_body
+                )
+                if not wl_match:
+                    malformed.append(
+                        ValidationMalformed(
+                            path=s_manual,
+                            reason=f"manual/sources.md missing wikilink [[{payload.analysis_path}]]",
+                        )
+                    )
+                else:
+                    ok.append(s_manual)
+        else:
+            missing.append(s_manual)
+
+        touched = len(ok)
+        if touched < 2:
+            malformed.append(
+                ValidationMalformed(
+                    path="<compile>", reason=f"compile touched only {touched} files; need ≥2"
+                )
+            )
+        return ValidationResult(ok=ok, missing=missing, malformed=malformed)
+
     if payload.ticker:
         notes = vc.company_notes_path(vault_root, payload.ticker)
         journal = vc.company_journal_path(vault_root, payload.ticker)

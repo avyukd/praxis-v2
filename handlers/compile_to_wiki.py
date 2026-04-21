@@ -23,7 +23,7 @@ log = get_logger("handlers.compile_to_wiki")
 async def handle(ctx: HandlerContext) -> HandlerResult:
     payload = CompileToWikiPayload.model_validate(ctx.payload)
     analysis_path = ctx.vault_root / payload.analysis_path
-    ticker = (payload.ticker or "UNKNOWN").upper() if payload.ticker else "UNKNOWN"
+    ticker = payload.ticker.upper() if payload.ticker else None
 
     # D38 — pre-write backup of notes.md so validator can shrink-guard later
     if payload.ticker:
@@ -35,11 +35,31 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
         except Exception as e:
             log.warning("compile.backup_fail", error=str(e))
 
-    user_prompt = f"""COMPILE TO WIKI
+    if ticker is None and payload.source_kind == "manual_source":
+        user_prompt = f"""COMPILE TO WIKI
 
 Source: {payload.source_kind}
 Analysis at: {analysis_path}
-Ticker: {ticker}
+
+No ticker is provided. Do NOT create or touch `companies/UNKNOWN/`.
+
+Your job:
+1. Read the source at {analysis_path}.
+2. Update or create <vault>/manual/sources.md with a concise dated note and a
+   wikilink citation `[[{payload.analysis_path}]]`.
+3. Append to <vault>/LOG.md:
+   `- <ISO timestamp> | compile_manual | [[{payload.analysis_path}]]`.
+4. Do NOT write to INDEX.md.
+
+Be concise. Exit when artifacts are written.
+"""
+    else:
+        ticker_display = ticker or "UNKNOWN"
+        user_prompt = f"""COMPILE TO WIKI
+
+Source: {payload.source_kind}
+Analysis at: {analysis_path}
+Ticker: {ticker_display}
 Accession: {payload.accession or "N/A"}
 
 Your job:
@@ -51,7 +71,7 @@ Your job:
 3. Append to <vault>/companies/{ticker}/journal.md:
    `- <ISO date>: compiled {payload.source_kind} [[{payload.analysis_path}]]`.
 4. Append to <vault>/LOG.md:
-   `- <ISO timestamp> | compile | {ticker} | [[{payload.analysis_path}]]`.
+   `- <ISO timestamp> | compile | {ticker_display} | [[{payload.analysis_path}]]`.
 5. Do NOT write to INDEX.md (refresh_index handles it).
 6. If the analysis references themes or concepts, append a dated bullet to
    their `## Evidence` section linking back to the analysis. Add this

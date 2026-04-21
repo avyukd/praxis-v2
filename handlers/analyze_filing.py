@@ -179,6 +179,18 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
         else:
             async with session_scope() as s:
                 mcap = await get_cached_mcap(s, payload.ticker)
+        # Canadian press pollers cache mcap under yfinance symbols (e.g. XYZ.TO / XYZ.V).
+        # If plain ticker lookup misses for press releases, probe those cache keys too.
+        if mcap is None and payload.form_type == "press_release":
+            suffix_candidates = [f"{payload.ticker}.TO", f"{payload.ticker}.V"]
+            for candidate in suffix_candidates:
+                if ctx.session is not None:
+                    mcap = await get_cached_mcap(ctx.session, candidate)
+                else:
+                    async with session_scope() as s:
+                        mcap = await get_cached_mcap(s, candidate)
+                if mcap is not None:
+                    break
 
     item_id = payload.release_id or payload.accession
     screen_excerpt = _truncate(raw_content, SCREEN_TRUNCATE_CHARS)
@@ -324,6 +336,9 @@ async def _enqueue_downstream(
     """
     analysis_rel = str((out_dir / "analysis.json").relative_to(ctx.vault_root))
     item_id = payload.release_id or payload.accession
+    dedup_item_id = (
+        f"{payload.source}:{item_id}" if payload.form_type == "press_release" else item_id
+    )
     urgency = "high" if result.magnitude >= 0.8 else "medium"
     signal_type = f"{payload.form_type}_{result.classification}"
     ticker_display = result.ticker or "?"
@@ -343,7 +358,7 @@ async def _enqueue_downstream(
                 "linked_analysis_path": analysis_rel,
             },
             priority=0,
-            dedup_key=f"notify:{payload.form_type}:{item_id}",
+            dedup_key=f"notify:{payload.form_type}:{dedup_item_id}",
         )
 
         # Compile to wiki — when ticker known (D37)
@@ -358,7 +373,7 @@ async def _enqueue_downstream(
                     "accession": payload.accession,
                 },
                 priority=1,
-                dedup_key=f"compile:{payload.form_type}:{item_id}",
+                dedup_key=f"compile:{payload.form_type}:{dedup_item_id}",
                 resource_key=f"company:{result.ticker}",
             )
 

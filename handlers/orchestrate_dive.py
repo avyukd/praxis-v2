@@ -92,6 +92,22 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
     inv_path = vc.investigation_path(ctx.vault_root, payload.investigation_handle)
     now_iso = et_iso()
 
+    async def _load_initiated_by(s) -> str:
+        row = (
+            await s.execute(
+                select(Investigation.initiated_by).where(
+                    Investigation.handle == payload.investigation_handle
+                )
+            )
+        ).first()
+        return str(row.initiated_by) if row is not None and row.initiated_by else "orchestrator"
+
+    if ctx.session is not None:
+        initiated_by = await _load_initiated_by(ctx.session)
+    else:
+        async with session_scope() as session:
+            initiated_by = await _load_initiated_by(session)
+
     company_notes = vc.company_notes_path(ctx.vault_root, payload.ticker)
     notes_excerpt = ""
     if company_notes.exists():
@@ -114,7 +130,7 @@ Frontmatter required:
   type: investigation
   status: active
   scope: company
-  initiated_by: {"observer" if "observer" in (payload.thesis_handle or "") else "user"}
+  initiated_by: {initiated_by}
   hypothesis: <1-2 sentence hypothesis>
   entry_nodes: [companies/{payload.ticker}]
   created_at: {now_iso}

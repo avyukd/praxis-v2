@@ -25,7 +25,7 @@ def _resource_key_for(task_type: TaskType, payload: dict[str, Any]) -> str | Non
         if not handle:
             return None
         return f"investigation:{handle}"
-    if kind in {"index", "lint", "journal"}:
+    if kind in {"index", "lint", "journal", "cleanup", "surface_ideas", "wiki_mgmt"}:
         return f"{kind}:singleton"
     return None
 

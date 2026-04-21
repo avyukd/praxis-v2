@@ -203,7 +203,7 @@ async def _process_release(release: PressRelease) -> ReleaseResult:
                 "release_id": release.release_id,
             },
             priority=0,
-            dedup_key=f"analyze_pr:{release.release_id}",
+            dedup_key=f"analyze_pr:{release.source}:{release.release_id}",
         )
 
     await emit_event(

@@ -44,13 +44,14 @@ async def run_llm(
 ) -> LLMResult:
     invoker = get_invoker()
     mcp_cfg = _mcp_config_for_vault(vault_root)
+    resolved_allowed_tools = BASE_ALLOWED_TOOLS if allowed_tools is None else allowed_tools
     return await invoker.run(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         model=model,
         max_budget_usd=max_budget_usd,
         mcp_config_path=str(mcp_cfg) if mcp_cfg else None,
-        allowed_tools=allowed_tools or BASE_ALLOWED_TOOLS,
+        allowed_tools=resolved_allowed_tools,
     )
 
 

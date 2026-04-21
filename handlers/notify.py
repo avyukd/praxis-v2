@@ -18,9 +18,9 @@ log = get_logger("handlers.notify")
 
 
 @retry(wait=wait_exponential(multiplier=1, min=1, max=30), stop=stop_after_attempt(4))
-def _push_ntfy(topic_url: str, title: str, body: str, priority: str = "default") -> None:
-    with httpx.Client(timeout=10) as client:
-        response = client.post(
+async def _push_ntfy(topic_url: str, title: str, body: str, priority: str = "default") -> None:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.post(
             topic_url,
             content=body.encode("utf-8"),
             headers={
@@ -51,7 +51,7 @@ async def handle(ctx: HandlerContext) -> HandlerResult:
 
     priority = _URGENCY_TO_PRIORITY.get(payload.urgency, "default")
     try:
-        _push_ntfy(topic_url, title=payload.title, body=body, priority=priority)
+        await _push_ntfy(topic_url, title=payload.title, body=body, priority=priority)
     except Exception as e:
         log.warning("notify.ntfy_fail", error=str(e), topic=topic_url)
         return HandlerResult(ok=False, message=f"ntfy push failed: {e}")

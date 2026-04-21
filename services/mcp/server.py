@@ -26,7 +26,6 @@ from praxis_core.tasks.enqueue import enqueue_task
 from praxis_core.time_et import et_iso, now_et, now_utc
 from praxis_core.vault import conventions as vc
 from praxis_core.vault.constitution import (
-    append_principle,
     constitution_path,
     read_constitution,
     remove_principle,
