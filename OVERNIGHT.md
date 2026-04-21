@@ -2840,7 +2840,11 @@ setup, then it runs on its own alongside the other sections:
 
 ### Open items
 
-### OF1 — auto-fix aggressiveness on prompt-adjacent changes
+### OF1 — RESOLVED: report-only for anything inside a SYSTEM_PROMPT constant
+Accepted the leaning default (2026-04-20). Prompts get reported, not
+auto-fixed, even for trivial path renames. Err on human review.
+
+### OF1 (original) — auto-fix aggressiveness on prompt-adjacent changes
 The D65 split says prompts get reported, not auto-fixed. Edge case:
 a prompt has a stale path like `_analyzed/filings/8-k/...` that got
 renamed. The "fix" is a pure find/replace. Should the loop:
@@ -2853,25 +2857,20 @@ Lean: **(b) report-only for anything inside a SYSTEM_PROMPT constant.**
 Err on the side of human review when it comes to prompts. Flag if you
 want to relax.
 
-### OF2 — track AUDIT_LOG.md in git?
-If we commit the log, future-you can see "what did the agent do
-overnight?" months from now. Cost: noisy commits.
-Propose: track AUDIT_FINDINGS.md (value retained post-cleanup), ignore
-AUDIT_LOG.md (operational noise).
+### OF2 — RESOLVED: track AUDIT_FINDINGS.md only, ignore AUDIT_LOG.md
+Accepted the leaning default (2026-04-20). Findings (historical value)
+stay in git; log (operational noise) stays local.
 
-### OF3 — should the audit loop run sanity tests against the live DB?
-Integration tests require Postgres. If we're rapidly modifying schemas
-during Sections A-E, running migrations + integration tests every 10
-min could thrash the DB.
-Propose: **unit tests only in the audit loop** (fast, no DB). Integration
-tests run once per Section commit as part of that section's own CI.
+### OF3 — RESOLVED: unit tests only in the audit loop
+Accepted the leaning default (2026-04-20). Integration tests run per
+section commit, not in the 10min loop.
 
 ---
 
 ### Status (Section F)
 
 - [x] D62-D67 decisions locked in
-- [ ] Open items OF1-OF3 resolved (leaning defaults proposed)
+- [x] Open items OF1-OF3 resolved (leaning defaults accepted 2026-04-20)
 - [x] `docs/audit-prompt.md` written (D64 prompt)
 - [x] `AUDIT_FINDINGS.md` + `AUDIT_LOG.md` initialized
 - [x] Cron scheduled
@@ -3260,7 +3259,14 @@ Single host. No split-target concern. See D68 update.
 ### OG2 — RESOLVED: Claude CLI 2.1.114 logged in on this host
 Max subscription active. CLI invoker will inherit auth cleanly.
 
-### OG3 — observability loop's authorization to restart services
+### OG3 — RESOLVED: agent-known sudo password
+Accepted 2026-04-20. Observability agent holds the sudo password in
+its prompt and executes `echo <pass> | sudo -S systemctl restart
+praxis-<service>`. Effectively passwordless for praxis-*.service
+without changing sudoers. Validated in-session via multiple dispatcher
+restarts.
+
+### OG3 (original) — observability loop's authorization to restart services
 D74 Tier 2 says the agent can `systemctl restart praxis-<service>`.
 This requires passwordless sudo for the `praxis` user on those
 specific units (sudoers config). Are you OK with that level of
@@ -3276,7 +3282,11 @@ pursuit of signal, human prunes after the fact" principle from Section
 A — same philosophy for self-healing. If a hard-heal is wrong, fix the
 code; don't gate production recovery on human availability.
 
-### OG4 — morning cadence — is 05:00 ET early enough?
+### OG4 — RESOLVED: 05:00 ET first firing
+Accepted the leaning default (2026-04-20). 3h slack before 08:00 ET
+pre-market burst is sufficient.
+
+### OG4 (original) — morning cadence — is 05:00 ET early enough?
 8-Ks start arriving around 06:00 ET (some companies file pre-open).
 Market opens 09:30 ET. Our ingest needs to be proven-working by 08:00
 ET so we're confident before the pre-market filing burst.
@@ -3287,7 +3297,11 @@ the observability loop to catch + heal any overnight drift.
 Propose: **05:00 ET first firing stands.** Flag if you want earlier
 (risky — you're asleep) or later (less slack).
 
-### OG5 — disk/filesystem monitoring threshold
+### OG5 — RESOLVED: threshold = max(5GB, 10% of total capacity)
+Accepted the leaning default (2026-04-20). Tune post-Monday after
+observing actual fill rate.
+
+### OG5 (original) — disk/filesystem monitoring threshold
 D74 step g says "disk free >5GB." Tune based on your actual disk size.
 If the deploy host has 200GB free, 5GB threshold is too low — you
 want escalation at ~20% capacity remaining, not "emergency only."
@@ -3334,10 +3348,9 @@ Implications for the install sequence:
 - [x] D68-D76 decisions locked in
 - [x] OG1 resolved — single host (this WSL box IS the Ryzen)
 - [x] OG2 confirmed — Claude CLI 2.1.114 authenticated locally
-- [ ] OG3 resolved — self-heal authorization level (leaning passwordless
-      sudo for restart-only)
-- [ ] OG4 confirmed — 05:00 ET first firing
-- [ ] OG5 tuned — disk threshold
+- [x] OG3 resolved — agent holds sudo password in prompt; validated in-session
+- [x] OG4 confirmed — 05:00 ET first firing
+- [x] OG5 tuned — threshold = max(5GB, 10% of total capacity)
 - [x] OG6 resolved — fade backups for now; no restic/S3 setup
 - [x] `.env` populated per D70
 - [x] Postgres + alembic per D69
