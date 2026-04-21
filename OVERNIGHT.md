@@ -3343,15 +3343,15 @@ Implications for the install sequence:
 - [x] Postgres + alembic per D69
 - [x] Claude CLI logged in on deploy host
 - [ ] ntfy topics subscribed on phone
-- [ ] `scripts/preflight.sh` written + green
-- [ ] `scripts/smoke.sh` extended for D73 sequence
-- [ ] New systemd units (press_us, press_ca, mcp-funds) for Track 1
-- [ ] Updated Procfile for Track 2
-- [ ] Pollers have `--once` flag
-- [ ] Services started (systemd or overmind)
-- [ ] D73 smoke sequence executed + all checkpoints green
-- [ ] `docs/observability-prompt.md` written
-- [ ] Observability loop scheduled per D74
+- [x] `scripts/preflight.sh` written + green (verified 2026-04-20 PM)
+- [x] `scripts/smoke.sh` extended for D73 sequence (rate-limit-aware)
+- [x] New systemd units (press_us, press_ca) for Track 1 (mcp-funds is stdio, not systemd)
+- [ ] Updated Procfile for Track 2 (deferred — single-host Ryzen is Track 1 only)
+- [x] Pollers have `--once` flag (press_us, press_ca, edgar_8k)
+- [x] Services started (systemd units active: dispatcher, scheduler, 4 pollers)
+- [x] D73 smoke sequence executed + quick checks green (LLM steps rate-limit-gated)
+- [x] `docs/observability-prompt.md` written
+- [x] Observability loop scheduled per D74 (running live)
 - [x] First manual iteration verified sane
 - [ ] Commit (infra unit files, scripts, prompts)
 
