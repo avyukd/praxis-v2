@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from handlers._plan_parser import parse_plan
+from handlers._plan_parser import PlannedTask, parse_plan, parse_plan_entries
 from praxis_core.schemas.task_types import TaskType
 
 
@@ -113,4 +113,44 @@ def test_custom_dive_recognized() -> None:
         TaskType.DIVE_FINANCIAL_RIGOROUS,
         TaskType.DIVE_CUSTOM,
         TaskType.SYNTHESIZE_MEMO,
+    ]
+
+
+def test_parse_plan_entries_extracts_custom_metadata() -> None:
+    body = """
+## Plan
+1. dive_financial_rigorous
+2. dive_custom — specialty=uranium-market-specialist
+   why: spot uranium and contracting drive the setup
+   focus: Cameco supply, Sprott flows, LT contracting
+3. synthesize_memo
+"""
+    result = parse_plan_entries(body)
+    assert result == [
+        PlannedTask(task_type=TaskType.DIVE_FINANCIAL_RIGOROUS),
+        PlannedTask(
+            task_type=TaskType.DIVE_CUSTOM,
+            specialty="uranium-market-specialist",
+            why="spot uranium and contracting drive the setup",
+            focus="Cameco supply, Sprott flows, LT contracting",
+        ),
+        PlannedTask(task_type=TaskType.SYNTHESIZE_MEMO),
+    ]
+
+
+def test_parse_plan_entries_handles_specialty_on_followup_line() -> None:
+    body = """
+## Plan
+1. dive_custom
+   specialty: legal-overhang
+   focus: active litigation and settlement range
+"""
+    result = parse_plan_entries(body)
+    assert result == [
+        PlannedTask(
+            task_type=TaskType.DIVE_CUSTOM,
+            specialty="legal-overhang",
+            why="",
+            focus="active litigation and settlement range",
+        )
     ]

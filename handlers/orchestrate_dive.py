@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from handlers import HandlerContext, HandlerResult
 from handlers._common import SYSTEM_PROMPT_PREFIX, read_vault_schema, run_llm
-from handlers._plan_parser import parse_plan
+from handlers._plan_parser import PlannedTask, parse_plan_entries
 from praxis_core.db.models import Investigation
 from praxis_core.db.session import session_scope
 from praxis_core.logging import get_logger
@@ -224,37 +224,40 @@ may skip that specialty. Err on running the dive when in doubt.
         plan_text = inv_path.read_text(encoding="utf-8")
     except OSError:
         plan_text = ""
-    parsed_plan = parse_plan(plan_text)
+    parsed_entries = parse_plan_entries(plan_text)
     # Defensive: the LLM sometimes uses renamed or old task-type names
     # (e.g. dive_business instead of dive_business_moat) — the parser
     # silently drops unknown names, leaving behind just synthesize_memo.
     # If the parsed plan has no dive_* specialists, treat as invalid
     # and fall back to the default plan. Otherwise we'd write a
     # meaningless "Too Hard" memo on zero research.
-    has_specialist = any(t.value.startswith("dive_") for t in parsed_plan)
-    if parsed_plan and not has_specialist:
+    has_specialist = any(entry.task_type.value.startswith("dive_") for entry in parsed_entries)
+    if parsed_entries and not has_specialist:
         log.warning(
             "orchestrate_dive.plan_has_no_specialists",
             task_id=ctx.task_id,
-            parsed_types=[t.value for t in parsed_plan],
+            parsed_types=[entry.task_type.value for entry in parsed_entries],
             action="falling back to default_plan",
         )
-    if parsed_plan and has_specialist:
-        plan_types = parsed_plan
+    if parsed_entries and has_specialist:
+        plan_entries = parsed_entries
     else:
-        plan_types = default_plan
+        plan_entries = [PlannedTask(task_type=t) for t in default_plan]
 
-    # dive_custom requires a `specialty` field in its payload that the plan
-    # parser can't extract from free-text markdown. Until parsing catches
-    # up, drop dive_custom from plans so the ValidationError doesn't DL the
-    # whole orchestrate_dive task. Other specialists in the same plan still
-    # run — better to lose one bespoke dive than the entire investigation.
-    if TaskType.DIVE_CUSTOM in plan_types:
-        plan_types = [t for t in plan_types if t != TaskType.DIVE_CUSTOM]
+    invalid_customs = [
+        entry for entry in plan_entries if entry.task_type == TaskType.DIVE_CUSTOM and not entry.specialty
+    ]
+    if invalid_customs:
+        plan_entries = [
+            entry
+            for entry in plan_entries
+            if entry.task_type != TaskType.DIVE_CUSTOM or entry.specialty
+        ]
         log.warning(
-            "orchestrate_dive.dropped_dive_custom",
+            "orchestrate_dive.invalid_dive_custom",
             task_id=ctx.task_id,
-            reason="specialty extraction not yet wired through plan parser",
+            dropped=len(invalid_customs),
+            reason="missing specialty in parsed custom dive plan item",
         )
 
     # D24 coverage skip: if fresh themes/concepts already cover the
@@ -265,20 +268,26 @@ may skip that specialty. Err on running the dive when in doubt.
         ctx.vault_root, payload.ticker, ["geopolitical", "macro"]
     )
     skipped: list[str] = []
-    if coverage["geopolitical"] and TaskType.DIVE_GEOPOLITICAL_RISK in plan_types:
-        plan_types = [t for t in plan_types if t != TaskType.DIVE_GEOPOLITICAL_RISK]
+    if coverage["geopolitical"] and any(
+        entry.task_type == TaskType.DIVE_GEOPOLITICAL_RISK for entry in plan_entries
+    ):
+        plan_entries = [
+            entry
+            for entry in plan_entries
+            if entry.task_type != TaskType.DIVE_GEOPOLITICAL_RISK
+        ]
         skipped.append(
             f"dive_geopolitical_risk (covered by {len(coverage['geopolitical'])} vault files)"
         )
-    if coverage["macro"] and TaskType.DIVE_MACRO in plan_types:
-        plan_types = [t for t in plan_types if t != TaskType.DIVE_MACRO]
+    if coverage["macro"] and any(entry.task_type == TaskType.DIVE_MACRO for entry in plan_entries):
+        plan_entries = [entry for entry in plan_entries if entry.task_type != TaskType.DIVE_MACRO]
         skipped.append(f"dive_macro (covered by {len(coverage['macro'])} vault files)")
 
     log.info(
         "orchestrate_dive.plan_resolved",
         task_id=ctx.task_id,
-        parsed_count=len(parsed_plan),
-        using=[t.value for t in plan_types],
+        parsed_count=len(parsed_entries),
+        using=[entry.task_type.value for entry in plan_entries],
         coverage_skipped=skipped,
     )
 
@@ -296,18 +305,23 @@ may skip that specialty. Err on running the dive when in doubt.
         # ResearchBudget (word cap, web lookups, LLM $ budget).
         research_priority = getattr(inv, "research_priority", 5) or 5
 
-        def _payload_for(task_type: TaskType) -> dict:
+        def _payload_for(entry: PlannedTask) -> dict:
             base = {
                 "ticker": payload.ticker,
                 "investigation_handle": payload.investigation_handle,
                 "research_priority": research_priority,
             }
+            task_type = entry.task_type
             if task_type == TaskType.SYNTHESIZE_MEMO:
                 base["thesis_handle"] = payload.thesis_handle
                 base["memo_handle"] = memo_handle
+            if task_type == TaskType.DIVE_CUSTOM:
+                base["specialty"] = entry.specialty or "custom-analyst"
+                base["why"] = entry.why
+                base["focus"] = entry.focus
             return base
 
-        plan_sequence = [(t, _payload_for(t)) for t in plan_types]
+        plan_sequence = [(entry.task_type, _payload_for(entry)) for entry in plan_entries]
         for task_type, sub_payload in plan_sequence:
             await enqueue_task(
                 s,
