@@ -158,46 +158,58 @@ Total: ~2h15m. After A.1 we're correctness-ready on the known risks.
 
 ---
 
-## Section C — Deferred post-Monday
+## Section C — Post-Monday backlog (swept 2026-04-21)
 
-Real but not blocking. Track here so they don't get lost.
+Triaged 2026-04-21 after Monday open. Shipped what shipped;
+deliberate skips noted.
 
-- `[-]` **Resource-key contract missing for surface_ideas /
+- `[x]` **Resource-key contract missing for surface_ideas /
       cleanup_sessions / refresh_backlinks / ticker_index** (Round2 #2).
-      All get `resource_key=None`. For surface_ideas specifically
-      this lets multiple runs fan out in parallel. Nice-to-have.
-- `[-]` **Dashboard `innerHTML` XSS** (Round2 #17). Only Avyuk uses
-      it. Post-Monday security pass.
-- `[-]` **`notify` uses sync `httpx.Client` in async handler**
-      (Round2 #6). ntfy is fast enough today; swap to AsyncClient
-      when we touch that file.
-- `[-]` **`refresh_index` misses `index.md` stubs** (Round2 #11).
-      Minor graph hygiene.
-- `[-]` **`cleanup_sessions` skips Pydantic validation** (Round2 #12).
-      Consistency cleanup.
-- `[-]` **`generate_daily_journal` window on `started_at` only**
-      (Round2 #13). Edge case for midnight-crossing tasks.
-- `[-]` **Inbox YAML injection via filename** (Round2 #14). Avyuk-only
-      surface.
-- `[-]` **`emit_event` out-of-transaction** (Round2 #16). Real but
-      high blast radius — touch all event call sites. Post-Monday.
-- `[-]` **`syncer` retention by tick count** (Round2 #18). Syncer
-      disabled per OG6; moot.
-- `[-]` **`search_vault` unbounded** (Round2 #15). Small vault today.
-- `[-]` **Scheduler swallows per-job failures** (Codex #6). Add
-      consecutive-failure counter + alert. Post-Monday.
-- `[-]` **Dispatcher `_worker_seq` mutation** (Codex #3). Structural
-      tidy.
-- `[-]` **pyright + ruff red** (Codex #5). Clean file-by-file as we
-      touch them.
-- `[-]` **Theme investigations don't queue work** (Codex #2). Feature
-      gap; rarely used.
+      Already fixed in earlier commits (TASK_RESOURCE_KEYS now has
+      singleton keys for all four: `cleanup` / `surface_ideas` /
+      `wiki_mgmt`).
+- `[x]` **Dashboard `innerHTML` XSS** (Round2 #17). Shipped in 04160dc:
+      added `esc()` helper, applied to every user-controlled field
+      (last_error, investigation handle/hypothesis, signal title,
+      event payload, DL error).
+- `[x]` **`notify` uses sync `httpx.Client` in async handler**
+      (Round2 #6). Already fixed in 1402439.
+- `[x]` **`refresh_index` misses `index.md` stubs** (Round2 #11).
+      Shipped in 04160dc: now includes `<dir>/index.md` and
+      `<dir>/notes.md` stubs alongside top-level *.md.
+- `[x]` **`cleanup_sessions` skips Pydantic validation** (Round2 #12).
+      Shipped in 04160dc.
+- `[x]` **`generate_daily_journal` window on `started_at` only**
+      (Round2 #13). Shipped in 04160dc: OR'd finished_at into window.
+- `[x]` **Inbox YAML injection via filename** (Round2 #14). Shipped
+      in 04160dc: `_yaml_quote()` single-quotes filenames in
+      frontmatter.
+- `[x]` **`emit_event` out-of-transaction** (Round2 #16). Shipped in
+      04160dc: optional `session=` kwarg; worker.py callsites now
+      commit atomically with task-status. Poller callsites keep
+      independent scope.
+- `[-]` **`syncer` retention by tick count** (Round2 #18). Moot —
+      syncer disabled per OG6.
+- `[x]` **`search_vault` unbounded** (Round2 #15). Shipped in 04160dc:
+      MCP tool clamps caller limit to [1, 50].
+- `[x]` **Scheduler swallows per-job failures** (Codex #6). Already
+      fixed in 63d51cd.
+- `[x]` **Dispatcher `_worker_seq` mutation** (Codex #3). Shipped in
+      04160dc: pool.submit takes optional `worker_id=`, main.py reuses
+      the allocated ID.
+- `[-]` **pyright + ruff red** (Codex #5). Skip — process work,
+      touch-as-we-go.
+- `[x]` **Theme investigations don't queue work** (Codex #2). Already
+      addressed in bcd3e78 (fail-fast at MCP layer).
 - `[-]` **`dive_custom` dropped** + memo `SPECIALTIES` excludes
-      custom (Round2 #9/#10). Deliberate — re-enable once plan parser
-      extracts specialty.
+      custom (Round2 #9/#10). Deliberate skip — re-enable once plan
+      parser extracts specialty.
 - `[-]` **Test coverage gaps: press_ca/press_us/inbox_watcher/syncer/
       search_vault/file_to_vault/ingest_source/requeue_dead_letter**
-      (Round2 #20). Process work.
+      (Round2 #20). Skip — process work.
+
+**Sweep tally: 11 shipped (6 new in 04160dc + 5 already fixed),
+5 deliberately deferred.**
 
 ---
 
