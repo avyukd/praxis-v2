@@ -100,7 +100,7 @@ def classify_finish_reason(
     saw_result: bool,
     rate_limit_hit: bool,
 ) -> FinishReason:
-    if finish != "error" or returncode == 0 or saw_result:
+    if finish != "error" or returncode == 0:
         return finish
     if rate_limit_hit:
         return "rate_limit"
